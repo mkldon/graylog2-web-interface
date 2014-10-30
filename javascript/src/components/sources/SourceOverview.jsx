@@ -42,7 +42,7 @@ var SourceOverview = React.createClass({
         this.valueGroup = this.valueDimension.group().reduceSum((d) => d.y);
 
         return {
-            range: DEFAULT_RANGE_IN_SECS,
+            range: null,
             resolution: 'minute',
             filter: '',
             renderResultTable: false,
@@ -110,6 +110,7 @@ var SourceOverview = React.createClass({
                 }
             }
         }
+        range = this.props.params.range;
         this.changeRange(range);
     },
     renderPieChart() {
@@ -198,6 +199,9 @@ var SourceOverview = React.createClass({
                     var datum = d3.selectAll(parentTdElement).datum();
                     var source = datum.name;
                     UniversalSearch.addSegment(UniversalSearch.createSourceQuery(source), UniversalSearch.orOperator());
+                    if (window.event.altKey) {
+                        UniversalSearch.submit();
+                    }
                 });
             })
             .renderlet((table) => {
@@ -315,8 +319,16 @@ var SourceOverview = React.createClass({
         }
     },
     changeRange(range) {
-        if (typeof range === 'undefined' || SUPPORTED_RANGES_IN_SECS.indexOf(range) !== -1) {
+        if (range !== undefined) {
+            range = Number(range);
+        }
+
+        if (typeof range === 'undefined' || SUPPORTED_RANGES_IN_SECS.indexOf(range) === -1) {
             range = DEFAULT_RANGE_IN_SECS;
+        }
+
+        if (this.state.range === range) {
+            return;
         }
 
         // when range is changed the filter in line chart (corresponding to the brush) does not make any sense any more

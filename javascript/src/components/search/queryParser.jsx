@@ -7,42 +7,56 @@ var TokenTypes = {
     AND: "AND",
     OR: "OR",
     NOT: "NOT"
-}
+};
 
 class AST {
-    constructor(asConf) {
+    /**
+     *
+     * @param token {Token}
+     */
+    constructor(token) {
         /**
          * @type {Token}
          */
-        this.token = null;
+        this.token = token;
     }
 
 }
 
 class Token {
     constructor(tokenConf) {
+        if (tokenConf === undefined) {
+            tokenConf = {
+                input: null,
+                type: null,
+                begin: -1,
+                end: -1
+            };
+        }
         /**
          * @type {string}
          */
-        this.type = null;
+        this.input = tokenConf.input;
+        /**
+         * @type {string}
+         */
+        this.type = tokenConf.type;
         /**
          * @type {number}
          */
-        this.begin = -1;
+        this.begin = tokenConf.begin;
         /**
          * @type {number}
          */
-        this.end = -1;
+        this.end = tokenConf.end;
+    }
+
+    asString() {
+        return this.input.substring(this.begin, this.end);
     }
 }
 
-class OperatorToken extends Token {
-    constructor(tokenConf) {
-        super(tokenConf);
-    }
-}
-
-class QueryTokenizer {
+class QueryLexer {
     /**
      * @param input {string}
      */
@@ -59,14 +73,39 @@ class QueryTokenizer {
      * @returns {Token}
      */
     next() {
+        var token = null;
+        var la = this._la();
+        if (this.isDigit(la)) {
+            token = this.id();
+        }
+        return token;
+    }
 
+    id() {
+        var startPos = this.pos;
+        var la = this._la();
+        while (la !== -1 && this.isDigit(la)) {
+            this.consume();
+            la = this._la();
+        }
+        return new Token({
+            input: this.input,
+            type: TokenTypes.ID,
+            begin: startPos,
+            end: this.pos
+        });
+    }
+
+    // TODO: handle escaping using state pattern
+    isDigit(char) {
+        return ('a' <= char && char <= 'z') || ('A' <= char && char <= 'Z') || ('0' <= char && char <= '9');
     }
 
     consume() {
         this.pos++;
     }
 
-    _LA(la) {
+    _la(la) {
         la = la || 0;
         var index = this.pos + la;
         return (this.input.length <= index) ? -1 : this.input[index];
@@ -84,20 +123,29 @@ class QueryParser {
          */
         this.input = input;
         /**
-         * @type {QueryTokenizer}
+         * @type {QueryLexer}
          */
-        this.lexer = new QueryTokenizer(input);
+        this.lexer = new QueryLexer(input);
+
+        /**
+         *
+         * @type {Token}
+         */
+        this._currentToken = null;
     }
 
     /**
      * @returns {Token}
      */
     next() {
-        return this.lexer.next();
+        if (!this._currentToken) {
+            this._currentToken = this.lexer.next();
+        }
+        return this._currentToken;
     }
 
     consume() {
-        return this.lexer.next();
+        this._currentToken = null;
     }
 
     /**
@@ -105,23 +153,32 @@ class QueryParser {
      * @returns {AST}
      */
     parse() {
-        return expr();
+        return this.expr();
     }
 
     /**
      * @returns {AST}
      */
     expr() {
+        var ast = null;
         var token = this.next();
-        if (token.type === ID) {
-            var ast = new AST();
+        if (token !== null && token.type === TokenTypes.ID) {
+            ast = new AST(token);
+            this.consume();
         }
+        return ast;
     }
 
+    and() {
 
+    }
 
+    or() {
+
+    }
 }
 
 module.exports.QueryParser = QueryParser;
 module.exports.AST = AST;
 module.exports.Token = Token;
+module.exports.TokenTypes = TokenTypes;

@@ -35,7 +35,7 @@ var UniversalSearch = {
     parse() {
         var query = this._query();
         var parser = new queryParser.QueryParser(query);
-        return queryParser.parse();
+        return parser.parse();
     },
     getQuery() {
         return this._query().val();

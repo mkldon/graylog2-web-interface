@@ -2,27 +2,27 @@
 
 'use strict';
 
-jest.dontMock('../search/UniversalSearch');
+jest.dontMock('../search/queryParser');
 
 describe('UniversalSearch', function () {
 
-    var UniversalSearch;
+    var queryParser, AST, Token, QueryParser, TokenTypes;
+
     beforeEach(function () {
-        UniversalSearch = require('../search/UniversalSearch');
-        //var query = "http_response_code:(>=400 AND <=500)  AND  action:l*";
-        var query = "login";
-
-        UniversalSearch._query = jest.genMockFunction();
-        UniversalSearch._query.mockReturnValue(query);
-
+        queryParser = require('../search/queryParser');
+        AST = require('../search/queryParser').AST;
+        Token = require('../search/queryParser').Token;
+        QueryParser = require('../search/queryParser').QueryParser;
+        TokenTypes = require('../search/queryParser').TokenTypes;
     });
 
     it('can parse a query', function () {
-        var ast = UniversalSearch.parse();
-        expect(UniversalSearch._query).toBeCalled();
+        var query = "login";
+        var parser = new QueryParser(query);
+        var ast = parser.parse();
         expect(ast instanceof AST).toBeTruthy();
-        expect(ast.type).toBe("AST");
-
-
+        expect(ast.token instanceof Token).toBeTruthy();
+        expect(ast.token.type).toBe(TokenTypes.ID);
+        expect(ast.token.asString()).toBe(query);
     });
 });
