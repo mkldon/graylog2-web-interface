@@ -3,6 +3,7 @@
 'use strict';
 
 var $ = require('jquery'); // excluded and shimed
+var queryParser = require('./queryParser');
 
 var initialized = false;
 
@@ -30,6 +31,11 @@ var UniversalSearch = {
         query.val(search);
         query.effect("bounce");
         this.scrollToSearchbarHint();
+    },
+    parse() {
+        var query = this._query();
+        var parser = new queryParser.QueryParser(query);
+        return queryParser.parse();
     },
     getQuery() {
         return this._query().val();

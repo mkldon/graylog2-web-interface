@@ -110,7 +110,6 @@ var SourceOverview = React.createClass({
                 }
             }
         }
-        range = this.props.params.range;
         this.changeRange(range);
     },
     renderPieChart() {
@@ -320,9 +319,6 @@ var SourceOverview = React.createClass({
             range = DEFAULT_RANGE_IN_SECS;
         }
 
-        if (this.state.range === range) {
-            return;
-        }
         // when range is changed the filter in line chart (corresponding to the brush) does not make any sense any more
         this.valueDimension.filterAll();
         if (this.lineChart) {
