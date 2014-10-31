@@ -20,7 +20,6 @@ exports.DumpVisitor = DumpVisitor;
     TokenType[TokenType["AND"] = 2] = "AND";
     TokenType[TokenType["OR"] = 3] = "OR";
     TokenType[TokenType["NOT"] = 4] = "NOT";
-    TokenType[TokenType["EOF"] = 5] = "EOF";
 })(exports.TokenType || (exports.TokenType = {}));
 var TokenType = exports.TokenType;
 var ExprAST = (function () {
@@ -78,7 +77,7 @@ var QueryLexer = (function () {
     }
     QueryLexer.prototype.next = function () {
         var token = null;
-        var la = this._la();
+        var la = this.la();
         if (this.isDigit(la)) {
             token = this.term();
         }
@@ -89,35 +88,35 @@ var QueryLexer = (function () {
     };
     QueryLexer.prototype.term = function () {
         var startPos = this.pos;
-        var la = this._la();
-        while (la !== -1 && this.isDigit(la)) {
+        var la = this.la();
+        while (la !== null && this.isDigit(la)) {
             this.consume();
-            la = this._la();
+            la = this.la();
         }
         return new Token(this.input, 0 /* TERM */, startPos, this.pos);
     };
     QueryLexer.prototype.phrase = function () {
         var startPos = this.pos;
         this.consume(); // skip starting "
-        var la = this._la();
-        while (la !== -1 && la !== '"') {
+        var la = this.la();
+        while (la !== null && la !== '"') {
             this.consume();
-            la = this._la();
+            la = this.la();
         }
         this.consume(); // skip ending "
         return new Token(this.input, 1 /* PHRASE */, startPos, this.pos);
     };
     // TODO: handle escaping using state pattern
     QueryLexer.prototype.isDigit = function (char) {
-        return ('a' <= char && char <= 'z') || ('A' <= char && char <= 'Z') || ('0' <= char && char <= '9');
+        return char !== null && (('a' <= char && char <= 'z') || ('A' <= char && char <= 'Z') || ('0' <= char && char <= '9'));
     };
     QueryLexer.prototype.consume = function () {
         this.pos++;
     };
-    QueryLexer.prototype._la = function (la) {
+    QueryLexer.prototype.la = function (la) {
         if (la === void 0) { la = 0; }
         var index = this.pos + la;
-        return (this.input.length <= index) ? -1 : this.input[index];
+        return (this.input.length <= index) ? null : this.input[index];
     };
     return QueryLexer;
 })();
@@ -128,31 +127,48 @@ var QueryParser = (function () {
     function QueryParser(input) {
         this.input = input;
         this.lexer = new QueryLexer(input);
-        this._currentToken = null;
+        this.tokenBuffer = [];
     }
-    QueryParser.prototype.next = function () {
-        if (!this._currentToken) {
-            this._currentToken = this.lexer.next();
-        }
-        return this._currentToken;
-    };
     QueryParser.prototype.consume = function () {
-        this._currentToken = null;
+        this.tokenBuffer.splice(0, 1);
+    };
+    QueryParser.prototype.la = function (la) {
+        if (la === void 0) { la = 0; }
+        while (la >= this.tokenBuffer.length) {
+            var token = this.lexer.next();
+            if (token === null) {
+                return null;
+            }
+            this.tokenBuffer.push(token);
+        }
+        return this.tokenBuffer[la];
     };
     QueryParser.prototype.parse = function () {
         return this.expr();
     };
     QueryParser.prototype.expr = function () {
-        var ast = null;
-        var token = this.next();
+        var left = null;
+        var token = this.la();
         if (token !== null && token.type === 0 /* TERM */) {
-            ast = new TermAST(token);
-            this.consume();
+            left = this.term();
         }
         else if (token !== null && token.type === 1 /* PHRASE */) {
-            ast = new TermAST(token, true);
-            this.consume();
+            left = this.phrase();
         }
+        if (this.la() === null) {
+            return left;
+        }
+    };
+    QueryParser.prototype.term = function () {
+        var token = this.la();
+        this.consume();
+        var ast = new TermAST(token);
+        return ast;
+    };
+    QueryParser.prototype.phrase = function () {
+        var token = this.la();
+        this.consume();
+        var ast = new TermAST(token, true);
         return ast;
     };
     QueryParser.prototype.and = function () {
