@@ -1,17 +1,34 @@
 'use strict';
 
-export enum TokenType {
-    ID, AND, OR, NOT, EOF
+export interface Visitor {
+    visit(ast: AST);
+    result();
 }
 
+export class DumpVisitor implements Visitor {
+    private buffer = [];
+    visit(ast: AST) {
+        this.buffer.push(ast.token().asString());
+        ast.children().forEach((child) => this.visit(child));
+    }
+    result() {
+        return this.buffer.join("");
+    }
+
+}
+
+export enum TokenType {
+    TERM, PHRASE, AND, OR, NOT, EOF
+}
 
 export interface AST {
     token(): Token;
+    children(): Array<AST>;
 }
 
 export class ExprAST implements AST {
-    constructor(private op:Token, private left:ExprAST,
-                private right:ExprAST) {
+    constructor(private op:Token, public left:ExprAST,
+                public right:ExprAST) {
         this.left = left;
         this.right = right;
         this.op = op;
@@ -20,15 +37,24 @@ export class ExprAST implements AST {
     token() {
         return this.op;
     }
+
+    children() {
+        // TODO
+        return [];
+    }
 }
 
-export class IdAST implements AST {
-    constructor(private id:Token) {
-        this.id = id;
+export class TermAST implements AST {
+    constructor(public term:Token, public phrase?: boolean) {
+        this.phrase = (phrase !== undefined && phrase)  || term.asString().indexOf(" ") !== -1;
     }
 
     token() {
-        return this.id;
+        return this.term;
+    }
+    children() {
+        // TODO
+        return [];
     }
 }
 
@@ -51,19 +77,33 @@ class QueryLexer {
         var token = null;
         var la = this._la();
         if (this.isDigit(la)) {
-            token = this.id();
+            token = this.term();
+        } else if (la === '"') {
+            token = this.phrase();
         }
         return token;
     }
 
-    id() {
+    term() {
         var startPos = this.pos;
         var la = this._la();
         while (la !== -1 && this.isDigit(la)) {
             this.consume();
             la = this._la();
         }
-        return new Token(this.input, TokenType.ID, startPos, this.pos);
+        return new Token(this.input, TokenType.TERM, startPos, this.pos);
+    }
+
+    phrase() {
+        var startPos = this.pos;
+        this.consume(); // skip starting "
+        var la = this._la();
+        while (la !== -1 && la !== '"') {
+            this.consume();
+            la = this._la();
+        }
+        this.consume(); // skip ending "
+        return new Token(this.input, TokenType.PHRASE, startPos, this.pos);
     }
 
     // TODO: handle escaping using state pattern
@@ -81,6 +121,9 @@ class QueryLexer {
     }
 }
 
+/**
+ * Parser for http://lucene.apache.org/core/2_9_4/queryparsersyntax.html
+ */
 export class QueryParser {
     private lexer: QueryLexer;
     private _currentToken: Token;
@@ -107,8 +150,11 @@ export class QueryParser {
     expr(): AST {
         var ast = null;
         var token = this.next();
-        if (token !== null && token.type === TokenType.ID) {
-            ast = new IdAST(token);
+        if (token !== null && token.type === TokenType.TERM) {
+            ast = new TermAST(token);
+            this.consume();
+        } else if (token !== null && token.type === TokenType.PHRASE) {
+            ast = new TermAST(token, true);
             this.consume();
         }
         return ast;

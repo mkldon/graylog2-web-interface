@@ -1,10 +1,26 @@
 'use strict';
+var DumpVisitor = (function () {
+    function DumpVisitor() {
+        this.buffer = [];
+    }
+    DumpVisitor.prototype.visit = function (ast) {
+        var _this = this;
+        this.buffer.push(ast.token().asString());
+        ast.children().forEach(function (child) { return _this.visit(child); });
+    };
+    DumpVisitor.prototype.result = function () {
+        return this.buffer.join("");
+    };
+    return DumpVisitor;
+})();
+exports.DumpVisitor = DumpVisitor;
 (function (TokenType) {
-    TokenType[TokenType["ID"] = 0] = "ID";
-    TokenType[TokenType["AND"] = 1] = "AND";
-    TokenType[TokenType["OR"] = 2] = "OR";
-    TokenType[TokenType["NOT"] = 3] = "NOT";
-    TokenType[TokenType["EOF"] = 4] = "EOF";
+    TokenType[TokenType["TERM"] = 0] = "TERM";
+    TokenType[TokenType["PHRASE"] = 1] = "PHRASE";
+    TokenType[TokenType["AND"] = 2] = "AND";
+    TokenType[TokenType["OR"] = 3] = "OR";
+    TokenType[TokenType["NOT"] = 4] = "NOT";
+    TokenType[TokenType["EOF"] = 5] = "EOF";
 })(exports.TokenType || (exports.TokenType = {}));
 var TokenType = exports.TokenType;
 var ExprAST = (function () {
@@ -19,20 +35,29 @@ var ExprAST = (function () {
     ExprAST.prototype.token = function () {
         return this.op;
     };
+    ExprAST.prototype.children = function () {
+        // TODO
+        return [];
+    };
     return ExprAST;
 })();
 exports.ExprAST = ExprAST;
-var IdAST = (function () {
-    function IdAST(id) {
-        this.id = id;
-        this.id = id;
+var TermAST = (function () {
+    function TermAST(term, phrase) {
+        this.term = term;
+        this.phrase = phrase;
+        this.phrase = (phrase !== undefined && phrase) || term.asString().indexOf(" ") !== -1;
     }
-    IdAST.prototype.token = function () {
-        return this.id;
+    TermAST.prototype.token = function () {
+        return this.term;
     };
-    return IdAST;
+    TermAST.prototype.children = function () {
+        // TODO
+        return [];
+    };
+    return TermAST;
 })();
-exports.IdAST = IdAST;
+exports.TermAST = TermAST;
 var Token = (function () {
     function Token(input, type, beginPos, endPos) {
         this.input = input;
@@ -55,18 +80,32 @@ var QueryLexer = (function () {
         var token = null;
         var la = this._la();
         if (this.isDigit(la)) {
-            token = this.id();
+            token = this.term();
+        }
+        else if (la === '"') {
+            token = this.phrase();
         }
         return token;
     };
-    QueryLexer.prototype.id = function () {
+    QueryLexer.prototype.term = function () {
         var startPos = this.pos;
         var la = this._la();
         while (la !== -1 && this.isDigit(la)) {
             this.consume();
             la = this._la();
         }
-        return new Token(this.input, 0 /* ID */, startPos, this.pos);
+        return new Token(this.input, 0 /* TERM */, startPos, this.pos);
+    };
+    QueryLexer.prototype.phrase = function () {
+        var startPos = this.pos;
+        this.consume(); // skip starting "
+        var la = this._la();
+        while (la !== -1 && la !== '"') {
+            this.consume();
+            la = this._la();
+        }
+        this.consume(); // skip ending "
+        return new Token(this.input, 1 /* PHRASE */, startPos, this.pos);
     };
     // TODO: handle escaping using state pattern
     QueryLexer.prototype.isDigit = function (char) {
@@ -82,6 +121,9 @@ var QueryLexer = (function () {
     };
     return QueryLexer;
 })();
+/**
+ * Parser for http://lucene.apache.org/core/2_9_4/queryparsersyntax.html
+ */
 var QueryParser = (function () {
     function QueryParser(input) {
         this.input = input;
@@ -103,8 +145,12 @@ var QueryParser = (function () {
     QueryParser.prototype.expr = function () {
         var ast = null;
         var token = this.next();
-        if (token !== null && token.type === 0 /* ID */) {
-            ast = new IdAST(token);
+        if (token !== null && token.type === 0 /* TERM */) {
+            ast = new TermAST(token);
+            this.consume();
+        }
+        else if (token !== null && token.type === 1 /* PHRASE */) {
+            ast = new TermAST(token, true);
             this.consume();
         }
         return ast;
