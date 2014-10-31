@@ -97,7 +97,7 @@ gulp.task('prepare-lint', ['clean'], function () {
         .pipe(gulp.dest('dist/jsx'));
 });
 
-var lintSrc = ['src/**/*.js', 'dist/jsx/**/*.js', '!src/**/__tests__/**'];
+var lintSrc = ['src/**/*.js', 'dist/jsx/**/*.js', '!src/**/__tests__/**', '!src/ts/**/**'];
 
 gulp.task('lint', ['prepare-lint'], function () {
     return gulp.src(lintSrc)

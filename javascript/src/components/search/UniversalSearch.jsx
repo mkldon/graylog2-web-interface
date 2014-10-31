@@ -3,7 +3,7 @@
 'use strict';
 
 var $ = require('jquery'); // excluded and shimed
-var queryParser = require('./queryParser');
+var queryParser = require('../../ts/search/queryParser');
 
 var initialized = false;
 
