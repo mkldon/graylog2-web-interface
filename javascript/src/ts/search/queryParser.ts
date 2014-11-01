@@ -5,15 +5,28 @@ import Immutable = require('immutable');
 
 export interface Visitor {
     visit(ast: AST);
-    result();
 }
 
 export class DumpVisitor implements Visitor {
     private buffer = [];
+
     visit(ast: AST) {
-        this.buffer.push(ast.token().asString());
-        ast.children().forEach((child) => this.visit(child));
+        if (ast === null) {
+            return;
+        } else if (ast instanceof ExprAST) {
+            var expr = <ExprAST>ast;
+            this.visit(expr.left);
+            this.dumpToken(ast);
+            this.visit(expr.right);
+        } else {
+            ast.token() !== null && this.buffer.push(ast.token().asString());
+        }
     }
+
+    private dumpToken(ast) {
+        ast.token() !== null && this.buffer.push(ast.token().asString());
+    }
+
     result() {
         return this.buffer.join("");
     }
@@ -21,17 +34,16 @@ export class DumpVisitor implements Visitor {
 }
 
 export enum TokenType {
-    TERM, PHRASE, AND, OR, NOT
+    EOF, WS, TERM, PHRASE, AND, OR, NOT
 }
 
 export interface AST {
     token(): Token;
-    children(): Immutable.List<AST>;
 }
 
 export class ExprAST implements AST {
-    constructor(private op:Token, public left:ExprAST,
-                public right:ExprAST) {
+    constructor(public left: TermAST, public op?: Token,
+                public right?: ExprAST) {
         this.left = left;
         this.right = right;
         this.op = op;
@@ -40,22 +52,15 @@ export class ExprAST implements AST {
     token() {
         return this.op;
     }
-
-    children() {
-        return Immutable.List.of(this.left, this.right);
-    }
 }
 
 export class TermAST implements AST {
-    constructor(public term:Token, public phrase?: boolean) {
-        this.phrase = (phrase !== undefined && phrase)  || term.asString().indexOf(" ") !== -1;
+    constructor(public term: Token, public phrase?: boolean) {
+        this.phrase = (phrase !== undefined && phrase) || term.asString().indexOf(" ") !== -1;
     }
 
     token() {
         return this.term;
-    }
-    children() {
-        return Immutable.List.of<AST>();
     }
 }
 
@@ -69,20 +74,44 @@ export class Token {
 }
 
 class QueryLexer {
-    private pos: number;
+    public pos: number;
+    private eofToken: Token;
+
     constructor(private input: string) {
         this.pos = 0;
+        this.eofToken = new Token(this.input, TokenType.EOF, input.length - 1, input.length - 1);
     }
 
     next(): Token {
-        var token = null;
+        var token = this.eofToken;
         var la = this.la();
-        if (this.isDigit(la)) {
-            token = this.term();
+        if (this.isWhitespace(la)) {
+            token = this.whitespace();
+        } else if (la === 'O' && this.la(1) === 'R' && (this.isWhitespace(this.la(2)) || this.la(2) === null)) {
+            token = this.or();
         } else if (la === '"') {
             token = this.phrase();
+        } else if (this.isDigit(la)) {
+            token = this.term();
         }
         return token;
+    }
+
+    or() {
+        var startPos = this.pos;
+        this.consume();
+        this.consume();
+        return new Token(this.input, TokenType.OR, startPos, this.pos);
+    }
+
+    whitespace() {
+        var startPos = this.pos;
+        var la = this.la();
+        while (la !== null && this.isWhitespace(la)) {
+            this.consume();
+            la = this.la();
+        }
+        return new Token(this.input, TokenType.WS, startPos, this.pos);
     }
 
     term() {
@@ -112,14 +141,23 @@ class QueryLexer {
         return char !== null && (('a' <= char && char <= 'z') || ('A' <= char && char <= 'Z') || ('0' <= char && char <= '9'));
     }
 
+    isWhitespace(char) {
+        return '\n\r \t'.indexOf(char) !== -1;
+    }
+
     consume() {
         this.pos++;
     }
 
-    la(la: number=0): string {
+    la(la: number = 0): string {
         var index = this.pos + la;
         return (this.input.length <= index) ? null : this.input[index];
     }
+}
+
+export interface ErrorObject {
+    position: number;
+    message: string;
 }
 
 /**
@@ -128,41 +166,91 @@ class QueryLexer {
 export class QueryParser {
     private lexer: QueryLexer;
     private tokenBuffer: Array<Token>;
+    public error: ErrorObject = null;
+
     constructor(private input: string) {
         this.lexer = new QueryLexer(input);
         this.tokenBuffer = [];
     }
 
-    consume() {
-        this.tokenBuffer.splice(0 ,1);
+    private consume() {
+        this.tokenBuffer.splice(0, 1);
     }
 
-    la(la: number=0): Token {
+    private la(la: number = 0): Token {
         // fill token buffer until we can look far ahead
         while (la >= this.tokenBuffer.length) {
             var token = this.lexer.next();
-            if (token === null) {
-                return null;
+            if (token.type === TokenType.EOF) {
+                return token;
             }
             this.tokenBuffer.push(token);
         }
         return this.tokenBuffer[la];
     }
-    parse(): AST {
-        return this.expr();
+
+    private skipWS() {
+        this.syncTo(TokenType.WS);
     }
 
-    expr(): AST {
-        var left = null;
-        var token = this.la();
-        if (token !== null && token.type === TokenType.TERM) {
-            left = this.term();
-        } else if (token !== null && token.type === TokenType.PHRASE) {
-            left = this.phrase();
+    private syncTo(syncTo: TokenType) {
+        while (this.la().type === syncTo) {
+            this.consume();
         }
-        if (this.la() === null) {
-            return left;
+    }
+
+    // TODO: Do we rather want to abort the parse here? Send the error?
+    private unexpectedToken(syncTo: TokenType) {
+        this.error = {
+            position: this.lexer.pos,
+            message: "Unexpected input"
+        };
+        this.syncTo(syncTo);
+    }
+
+    parse(): AST {
+        this.error = null;
+        var ast;
+        this.skipWS();
+        ast = this.expr();
+        this.skipWS();
+        return ast;
+    }
+
+    expr(): ExprAST {
+        var left: TermAST = null;
+        var op: Token = null;
+        var right: ExprAST = null;
+
+        // left
+        switch (this.la().type) {
+            case TokenType.TERM:
+                left = this.term();
+                break;
+            case TokenType.PHRASE:
+                left = this.phrase();
+                break;
+            default:
+                this.unexpectedToken(TokenType.EOF);
+                break;
         }
+        this.skipWS();
+        if (this.la().type !== TokenType.EOF) {
+            // op
+            switch (this.la().type) {
+                case TokenType.OR:
+                case TokenType.AND:
+                    op = this.la();
+                    this.consume();
+                    break;
+                default:
+                    this.unexpectedToken(TokenType.EOF);
+                    break;
+            }
+            this.skipWS();
+            right = this.expr();
+        }
+        return new ExprAST(left, op, right);
     }
 
     term() {
@@ -177,18 +265,6 @@ export class QueryParser {
         this.consume();
         var ast = new TermAST(token, true);
         return ast;
-    }
-
-    and() {
-
-    }
-
-    or() {
-
-    }
-
-    not() {
-
     }
 }
 

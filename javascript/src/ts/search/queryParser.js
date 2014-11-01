@@ -1,14 +1,25 @@
 ///<reference path='./../../../node_modules/immutable/dist/Immutable.d.ts'/>
 'use strict';
-var Immutable = require('immutable');
 var DumpVisitor = (function () {
     function DumpVisitor() {
         this.buffer = [];
     }
     DumpVisitor.prototype.visit = function (ast) {
-        var _this = this;
-        this.buffer.push(ast.token().asString());
-        ast.children().forEach(function (child) { return _this.visit(child); });
+        if (ast === null) {
+            return;
+        }
+        else if (ast instanceof ExprAST) {
+            var expr = ast;
+            this.visit(expr.left);
+            this.dumpToken(ast);
+            this.visit(expr.right);
+        }
+        else {
+            ast.token() !== null && this.buffer.push(ast.token().asString());
+        }
+    };
+    DumpVisitor.prototype.dumpToken = function (ast) {
+        ast.token() !== null && this.buffer.push(ast.token().asString());
     };
     DumpVisitor.prototype.result = function () {
         return this.buffer.join("");
@@ -17,17 +28,19 @@ var DumpVisitor = (function () {
 })();
 exports.DumpVisitor = DumpVisitor;
 (function (TokenType) {
-    TokenType[TokenType["TERM"] = 0] = "TERM";
-    TokenType[TokenType["PHRASE"] = 1] = "PHRASE";
-    TokenType[TokenType["AND"] = 2] = "AND";
-    TokenType[TokenType["OR"] = 3] = "OR";
-    TokenType[TokenType["NOT"] = 4] = "NOT";
+    TokenType[TokenType["EOF"] = 0] = "EOF";
+    TokenType[TokenType["WS"] = 1] = "WS";
+    TokenType[TokenType["TERM"] = 2] = "TERM";
+    TokenType[TokenType["PHRASE"] = 3] = "PHRASE";
+    TokenType[TokenType["AND"] = 4] = "AND";
+    TokenType[TokenType["OR"] = 5] = "OR";
+    TokenType[TokenType["NOT"] = 6] = "NOT";
 })(exports.TokenType || (exports.TokenType = {}));
 var TokenType = exports.TokenType;
 var ExprAST = (function () {
-    function ExprAST(op, left, right) {
-        this.op = op;
+    function ExprAST(left, op, right) {
         this.left = left;
+        this.op = op;
         this.right = right;
         this.left = left;
         this.right = right;
@@ -35,9 +48,6 @@ var ExprAST = (function () {
     }
     ExprAST.prototype.token = function () {
         return this.op;
-    };
-    ExprAST.prototype.children = function () {
-        return Immutable.List.of(this.left, this.right);
     };
     return ExprAST;
 })();
@@ -50,9 +60,6 @@ var TermAST = (function () {
     }
     TermAST.prototype.token = function () {
         return this.term;
-    };
-    TermAST.prototype.children = function () {
-        return Immutable.List.of();
     };
     return TermAST;
 })();
@@ -74,17 +81,39 @@ var QueryLexer = (function () {
     function QueryLexer(input) {
         this.input = input;
         this.pos = 0;
+        this.eofToken = new Token(this.input, 0 /* EOF */, input.length - 1, input.length - 1);
     }
     QueryLexer.prototype.next = function () {
-        var token = null;
+        var token = this.eofToken;
         var la = this.la();
-        if (this.isDigit(la)) {
-            token = this.term();
+        if (this.isWhitespace(la)) {
+            token = this.whitespace();
+        }
+        else if (la === 'O' && this.la(1) === 'R' && (this.isWhitespace(this.la(2)) || this.la(2) === null)) {
+            token = this.or();
         }
         else if (la === '"') {
             token = this.phrase();
         }
+        else if (this.isDigit(la)) {
+            token = this.term();
+        }
         return token;
+    };
+    QueryLexer.prototype.or = function () {
+        var startPos = this.pos;
+        this.consume();
+        this.consume();
+        return new Token(this.input, 5 /* OR */, startPos, this.pos);
+    };
+    QueryLexer.prototype.whitespace = function () {
+        var startPos = this.pos;
+        var la = this.la();
+        while (la !== null && this.isWhitespace(la)) {
+            this.consume();
+            la = this.la();
+        }
+        return new Token(this.input, 1 /* WS */, startPos, this.pos);
     };
     QueryLexer.prototype.term = function () {
         var startPos = this.pos;
@@ -93,7 +122,7 @@ var QueryLexer = (function () {
             this.consume();
             la = this.la();
         }
-        return new Token(this.input, 0 /* TERM */, startPos, this.pos);
+        return new Token(this.input, 2 /* TERM */, startPos, this.pos);
     };
     QueryLexer.prototype.phrase = function () {
         var startPos = this.pos;
@@ -104,11 +133,14 @@ var QueryLexer = (function () {
             la = this.la();
         }
         this.consume(); // skip ending "
-        return new Token(this.input, 1 /* PHRASE */, startPos, this.pos);
+        return new Token(this.input, 3 /* PHRASE */, startPos, this.pos);
     };
     // TODO: handle escaping using state pattern
     QueryLexer.prototype.isDigit = function (char) {
         return char !== null && (('a' <= char && char <= 'z') || ('A' <= char && char <= 'Z') || ('0' <= char && char <= '9'));
+    };
+    QueryLexer.prototype.isWhitespace = function (char) {
+        return '\n\r \t'.indexOf(char) !== -1;
     };
     QueryLexer.prototype.consume = function () {
         this.pos++;
@@ -126,6 +158,7 @@ var QueryLexer = (function () {
 var QueryParser = (function () {
     function QueryParser(input) {
         this.input = input;
+        this.error = null;
         this.lexer = new QueryLexer(input);
         this.tokenBuffer = [];
     }
@@ -136,28 +169,68 @@ var QueryParser = (function () {
         if (la === void 0) { la = 0; }
         while (la >= this.tokenBuffer.length) {
             var token = this.lexer.next();
-            if (token === null) {
-                return null;
+            if (token.type === 0 /* EOF */) {
+                return token;
             }
             this.tokenBuffer.push(token);
         }
         return this.tokenBuffer[la];
     };
+    QueryParser.prototype.skipWS = function () {
+        this.syncTo(1 /* WS */);
+    };
+    QueryParser.prototype.syncTo = function (syncTo) {
+        while (this.la().type === syncTo) {
+            this.consume();
+        }
+    };
+    // TODO: Do we rather want to abort the parse here? Send the error?
+    QueryParser.prototype.unexpectedToken = function (syncTo) {
+        this.error = {
+            position: this.lexer.pos,
+            message: "Unexpected input"
+        };
+        this.syncTo(syncTo);
+    };
     QueryParser.prototype.parse = function () {
-        return this.expr();
+        this.error = null;
+        var ast;
+        this.skipWS();
+        ast = this.expr();
+        this.skipWS();
+        return ast;
     };
     QueryParser.prototype.expr = function () {
         var left = null;
-        var token = this.la();
-        if (token !== null && token.type === 0 /* TERM */) {
-            left = this.term();
+        var op = null;
+        var right = null;
+        switch (this.la().type) {
+            case 2 /* TERM */:
+                left = this.term();
+                break;
+            case 3 /* PHRASE */:
+                left = this.phrase();
+                break;
+            default:
+                this.unexpectedToken(0 /* EOF */);
+                break;
         }
-        else if (token !== null && token.type === 1 /* PHRASE */) {
-            left = this.phrase();
+        this.skipWS();
+        if (this.la().type !== 0 /* EOF */) {
+            switch (this.la().type) {
+                case 5 /* OR */:
+                case 4 /* AND */:
+                    op = this.la();
+                    this.consume();
+                    break;
+                default:
+                    this.unexpectedToken(0 /* EOF */);
+                    break;
+            }
+            this.skipWS();
+            right = this.expr();
         }
-        if (this.la() === null) {
-            return left;
-        }
+        return new ExprAST(left, op, right);
     };
     QueryParser.prototype.term = function () {
         var token = this.la();
@@ -170,12 +243,6 @@ var QueryParser = (function () {
         this.consume();
         var ast = new TermAST(token, true);
         return ast;
-    };
-    QueryParser.prototype.and = function () {
-    };
-    QueryParser.prototype.or = function () {
-    };
-    QueryParser.prototype.not = function () {
     };
     return QueryParser;
 })();
