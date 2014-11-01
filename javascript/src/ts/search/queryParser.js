@@ -98,6 +98,7 @@ var QueryLexer = (function () {
         else if (this.isDigit(la)) {
             token = this.term();
         }
+        // FIME: no matching token error instead of EOF
         return token;
     };
     QueryLexer.prototype.or = function () {
@@ -216,7 +217,10 @@ var QueryParser = (function () {
                 break;
         }
         this.skipWS();
-        if (this.la().type !== 0 /* EOF */) {
+        if (this.la().type === 0 /* EOF */) {
+            return left;
+        }
+        else {
             switch (this.la().type) {
                 case 5 /* OR */:
                 case 4 /* AND */:
@@ -229,8 +233,8 @@ var QueryParser = (function () {
             }
             this.skipWS();
             right = this.expr();
+            return new ExprAST(left, op, right);
         }
-        return new ExprAST(left, op, right);
     };
     QueryParser.prototype.term = function () {
         var token = this.la();

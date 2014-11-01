@@ -42,8 +42,8 @@ export interface AST {
 }
 
 export class ExprAST implements AST {
-    constructor(public left: TermAST, public op?: Token,
-                public right?: ExprAST) {
+    constructor(public left: TermAST, public op: Token,
+                public right: AST) {
         this.left = left;
         this.right = right;
         this.op = op;
@@ -94,6 +94,7 @@ class QueryLexer {
         } else if (this.isDigit(la)) {
             token = this.term();
         }
+        // FIME: no matching token error instead of EOF
         return token;
     }
 
@@ -217,10 +218,10 @@ export class QueryParser {
         return ast;
     }
 
-    expr(): ExprAST {
+    expr(): AST {
         var left: TermAST = null;
         var op: Token = null;
-        var right: ExprAST = null;
+        var right: AST = null;
 
         // left
         switch (this.la().type) {
@@ -235,7 +236,9 @@ export class QueryParser {
                 break;
         }
         this.skipWS();
-        if (this.la().type !== TokenType.EOF) {
+        if (this.la().type === TokenType.EOF) {
+            return left;
+        } else {
             // op
             switch (this.la().type) {
                 case TokenType.OR:
@@ -249,8 +252,8 @@ export class QueryParser {
             }
             this.skipWS();
             right = this.expr();
+            return new ExprAST(left, op, right);
         }
-        return new ExprAST(left, op, right);
     }
 
     term() {
