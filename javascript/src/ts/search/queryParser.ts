@@ -1,4 +1,7 @@
+///<reference path='./../../../node_modules/immutable/dist/Immutable.d.ts'/>
 'use strict';
+
+import Immutable = require('immutable');
 
 export interface Visitor {
     visit(ast: AST);
@@ -23,7 +26,7 @@ export enum TokenType {
 
 export interface AST {
     token(): Token;
-    children(): Array<AST>;
+    children(): Immutable.List<AST>;
 }
 
 export class ExprAST implements AST {
@@ -39,8 +42,7 @@ export class ExprAST implements AST {
     }
 
     children() {
-        // TODO
-        return [];
+        return Immutable.List.of(this.left, this.right);
     }
 }
 
@@ -53,8 +55,7 @@ export class TermAST implements AST {
         return this.term;
     }
     children() {
-        // TODO
-        return [];
+        return Immutable.List.of<AST>();
     }
 }
 

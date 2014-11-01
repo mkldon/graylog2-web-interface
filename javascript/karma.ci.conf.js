@@ -7,7 +7,8 @@ module.exports = function(config) {
 
     files: [
       'test/shim/es5-shim.js',
-      'test/shim/exports-shim.js',
+      'node_modules/immutable/dist/immutable.js',
+      'test/shim/commonjs-shim.js',
       'src/ts/search/queryParser.js',
       'test/*.js'
     ],

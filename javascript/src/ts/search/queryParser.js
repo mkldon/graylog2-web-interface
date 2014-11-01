@@ -1,4 +1,6 @@
+///<reference path='./../../../node_modules/immutable/dist/Immutable.d.ts'/>
 'use strict';
+var Immutable = require('immutable');
 var DumpVisitor = (function () {
     function DumpVisitor() {
         this.buffer = [];
@@ -35,8 +37,7 @@ var ExprAST = (function () {
         return this.op;
     };
     ExprAST.prototype.children = function () {
-        // TODO
-        return [];
+        return Immutable.List.of(this.left, this.right);
     };
     return ExprAST;
 })();
@@ -51,8 +52,7 @@ var TermAST = (function () {
         return this.term;
     };
     TermAST.prototype.children = function () {
-        // TODO
-        return [];
+        return Immutable.List.of();
     };
     return TermAST;
 })();
