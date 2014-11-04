@@ -1,5 +1,12 @@
 ///<reference path='./../../../node_modules/immutable/dist/Immutable.d.ts'/>
 'use strict';
+var __extends = this.__extends || function (d, b) {
+    for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
+    function __() { this.constructor = d; }
+    __.prototype = b.prototype;
+    d.prototype = new __();
+};
+var Immutable = require('immutable');
 var DumpVisitor = (function () {
     function DumpVisitor() {
         this.buffer = [];
@@ -11,15 +18,21 @@ var DumpVisitor = (function () {
         else if (ast instanceof ExprAST) {
             var expr = ast;
             this.visit(expr.left);
-            this.dumpToken(ast);
+            this.dumpWithPrefixAndSuffix(ast);
             this.visit(expr.right);
         }
-        else {
-            ast.token() !== null && this.buffer.push(ast.token().asString());
+        else if (ast instanceof BaseAST) {
+            this.dumpWithPrefixAndSuffix(ast);
         }
     };
-    DumpVisitor.prototype.dumpToken = function (ast) {
-        ast.token() !== null && this.buffer.push(ast.token().asString());
+    DumpVisitor.prototype.dumpWithPrefixAndSuffix = function (ast) {
+        var _this = this;
+        ast.hiddenPrefixTokens().forEach(function (prefix) { return _this.dumpToken(prefix); });
+        this.dumpToken(ast.token());
+        ast.hiddenSuffixTokens().forEach(function (suffix) { return _this.dumpToken(suffix); });
+    };
+    DumpVisitor.prototype.dumpToken = function (token) {
+        token !== null && this.buffer.push(token.asString());
     };
     DumpVisitor.prototype.result = function () {
         return this.buffer.join("");
@@ -37,8 +50,27 @@ exports.DumpVisitor = DumpVisitor;
     TokenType[TokenType["NOT"] = 6] = "NOT";
 })(exports.TokenType || (exports.TokenType = {}));
 var TokenType = exports.TokenType;
-var ExprAST = (function () {
+var BaseAST = (function () {
+    function BaseAST() {
+        this.hiddenPrefix = Immutable.List.of();
+        this.hiddenSuffix = Immutable.List.of();
+    }
+    BaseAST.prototype.hiddenPrefixTokens = function () {
+        return this.hiddenPrefix;
+    };
+    /* abstract */
+    BaseAST.prototype.token = function () {
+        return undefined;
+    };
+    BaseAST.prototype.hiddenSuffixTokens = function () {
+        return this.hiddenSuffix;
+    };
+    return BaseAST;
+})();
+var ExprAST = (function (_super) {
+    __extends(ExprAST, _super);
     function ExprAST(left, op, right) {
+        _super.call(this);
         this.left = left;
         this.op = op;
         this.right = right;
@@ -50,10 +82,12 @@ var ExprAST = (function () {
         return this.op;
     };
     return ExprAST;
-})();
+})(BaseAST);
 exports.ExprAST = ExprAST;
-var TermAST = (function () {
+var TermAST = (function (_super) {
+    __extends(TermAST, _super);
     function TermAST(term, phrase) {
+        _super.call(this);
         this.term = term;
         this.phrase = phrase;
         this.phrase = (phrase !== undefined && phrase) || term.asString().indexOf(" ") !== -1;
@@ -62,7 +96,7 @@ var TermAST = (function () {
         return this.term;
     };
     return TermAST;
-})();
+})(BaseAST);
 exports.TermAST = TermAST;
 var Token = (function () {
     function Token(input, type, beginPos, endPos) {
@@ -178,12 +212,15 @@ var QueryParser = (function () {
         return this.tokenBuffer[la];
     };
     QueryParser.prototype.skipWS = function () {
-        this.syncTo(1 /* WS */);
+        return this.syncTo(1 /* WS */);
     };
     QueryParser.prototype.syncTo = function (syncTo) {
+        var skippedTokens = Immutable.List.of().asMutable();
         while (this.la().type === syncTo) {
+            skippedTokens.push(this.la());
             this.consume();
         }
+        return skippedTokens.asImmutable();
     };
     // TODO: Do we rather want to abort the parse here? Send the error?
     QueryParser.prototype.unexpectedToken = function (syncTo) {
@@ -196,9 +233,12 @@ var QueryParser = (function () {
     QueryParser.prototype.parse = function () {
         this.error = null;
         var ast;
-        this.skipWS();
+        // FIXME: prefix gets lost on complex expression
+        var prefix = this.skipWS();
         ast = this.expr();
-        this.skipWS();
+        ast.hiddenPrefix = prefix;
+        // FIXME: Might overwrite the an already existing suffix set in expr()
+        ast.hiddenSuffix = this.skipWS();
         return ast;
     };
     QueryParser.prototype.expr = function () {
@@ -216,7 +256,7 @@ var QueryParser = (function () {
                 this.unexpectedToken(0 /* EOF */);
                 break;
         }
-        this.skipWS();
+        left.hiddenSuffix = this.skipWS();
         if (this.la().type === 0 /* EOF */) {
             return left;
         }
@@ -231,8 +271,9 @@ var QueryParser = (function () {
                     this.unexpectedToken(0 /* EOF */);
                     break;
             }
-            this.skipWS();
+            var prefix = this.skipWS();
             right = this.expr();
+            right.hiddenPrefix = prefix;
             return new ExprAST(left, op, right);
         }
     };

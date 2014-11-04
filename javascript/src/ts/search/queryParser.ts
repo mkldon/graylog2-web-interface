@@ -16,15 +16,20 @@ export class DumpVisitor implements Visitor {
         } else if (ast instanceof ExprAST) {
             var expr = <ExprAST>ast;
             this.visit(expr.left);
-            this.dumpToken(ast);
+            this.dumpWithPrefixAndSuffix(ast);
             this.visit(expr.right);
-        } else {
-            ast.token() !== null && this.buffer.push(ast.token().asString());
+        } else if (ast instanceof BaseAST) {
+            this.dumpWithPrefixAndSuffix(ast);
         }
     }
 
-    private dumpToken(ast) {
-        ast.token() !== null && this.buffer.push(ast.token().asString());
+    private dumpWithPrefixAndSuffix(ast: AST) {
+        ast.hiddenPrefixTokens().forEach((prefix) => this.dumpToken(prefix));
+        this.dumpToken(ast.token());
+        ast.hiddenSuffixTokens().forEach((suffix) => this.dumpToken(suffix));
+    }
+    private dumpToken(token: Token) {
+        token !== null && this.buffer.push(token.asString());
     }
 
     result() {
@@ -38,12 +43,34 @@ export enum TokenType {
 }
 
 export interface AST {
+    hiddenPrefixTokens(): Immutable.List<Token>;
     token(): Token;
+    hiddenSuffixTokens(): Immutable.List<Token>;
 }
 
-export class ExprAST implements AST {
+class BaseAST implements AST {
+    public hiddenPrefix: Immutable.List<Token> = Immutable.List.of<Token>();
+    public hiddenSuffix: Immutable.List<Token> = Immutable.List.of<Token>();
+
+    hiddenPrefixTokens() {
+        return this.hiddenPrefix;
+
+    }
+
+    /* abstract */
+    token(): Token {
+        return undefined;
+    }
+
+    hiddenSuffixTokens() {
+        return this.hiddenSuffix;
+    }
+}
+
+export class ExprAST extends BaseAST implements AST {
     constructor(public left: TermAST, public op: Token,
                 public right: AST) {
+        super();
         this.left = left;
         this.right = right;
         this.op = op;
@@ -54,8 +81,9 @@ export class ExprAST implements AST {
     }
 }
 
-export class TermAST implements AST {
+export class TermAST extends BaseAST implements AST {
     constructor(public term: Token, public phrase?: boolean) {
+        super();
         this.phrase = (phrase !== undefined && phrase) || term.asString().indexOf(" ") !== -1;
     }
 
@@ -190,14 +218,17 @@ export class QueryParser {
         return this.tokenBuffer[la];
     }
 
-    private skipWS() {
-        this.syncTo(TokenType.WS);
+    private skipWS(): Immutable.List<Token> {
+        return this.syncTo(TokenType.WS);
     }
 
-    private syncTo(syncTo: TokenType) {
+    private syncTo(syncTo: TokenType): Immutable.List<Token> {
+        var skippedTokens = Immutable.List.of<Token>().asMutable();
         while (this.la().type === syncTo) {
+            skippedTokens.push(this.la());
             this.consume();
         }
+        return skippedTokens.asImmutable();
     }
 
     // TODO: Do we rather want to abort the parse here? Send the error?
@@ -212,16 +243,19 @@ export class QueryParser {
     parse(): AST {
         this.error = null;
         var ast;
-        this.skipWS();
+        // FIXME: prefix gets lost on complex expression
+        var prefix = this.skipWS();
         ast = this.expr();
-        this.skipWS();
+        ast.hiddenPrefix = prefix;
+        // FIXME: Might overwrite the an already existing suffix set in expr()
+        ast.hiddenSuffix  = this.skipWS();
         return ast;
     }
 
-    expr(): AST {
+    expr(): BaseAST {
         var left: TermAST = null;
         var op: Token = null;
-        var right: AST = null;
+        var right: BaseAST = null;
 
         // left
         switch (this.la().type) {
@@ -235,7 +269,7 @@ export class QueryParser {
                 this.unexpectedToken(TokenType.EOF);
                 break;
         }
-        this.skipWS();
+        left.hiddenSuffix = this.skipWS();
         if (this.la().type === TokenType.EOF) {
             return left;
         } else {
@@ -250,8 +284,9 @@ export class QueryParser {
                     this.unexpectedToken(TokenType.EOF);
                     break;
             }
-            this.skipWS();
+            var prefix = this.skipWS();
             right = this.expr();
+            right.hiddenPrefix = prefix;
             return new ExprAST(left, op, right);
         }
     }

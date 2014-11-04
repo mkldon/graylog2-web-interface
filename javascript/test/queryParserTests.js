@@ -45,7 +45,7 @@ describe('Query Parser', function () {
         expectIdentityDump(query);
     });
 
-    it('can parse or', function () {
+    it('can parse an or expression', function () {
         var query = "login OR submit";
         var parser = new QueryParser(query);
         var ast = parser.parse();
@@ -55,17 +55,22 @@ describe('Query Parser', function () {
         expect(ast.left.token().type).toBe(TokenType.TERM);
 
         expect(ast.op.type).toBe(TokenType.OR);
-
         expect(ast.right instanceof TermAST).toBeTruthy();
 
-        // FIXME: Attach the whitespaces to most suitable AST node and spit them out in dump visitor
-        //expectIdentityDump(query);
+        expectIdentityDump(query);
         var dumpVisitor = new queryParser.DumpVisitor();
         dumpVisitor.visit(ast);
         var dumped = dumpVisitor.result();
-        expect(dumped).toBe("loginORsubmit");
+        expect(dumped).toBe("login OR submit");
 
     });
+
+    //it('preserves whitespace on dump', function () {
+    //    var query = "  login  OR  \n \t  submit   ";
+    //    expectIdentityDump(query);
+    //    var query = " login ";
+    //    expectIdentityDump(query);
+    //});
 
 });
 
