@@ -125,8 +125,10 @@ class QueryLexer {
         var la = this.la();
         if (this.isWhitespace(la)) {
             token = this.whitespace();
-        } else if (la === 'O' && this.la(1) === 'R' && (this.isWhitespace(this.la(2)) || this.la(2) === null)) {
+        } else if (this.isKeyword("OR")) {
             token = this.or();
+        } else if (this.isKeyword("AND")) {
+            token = this.and();
         } else if (la === '"') {
             token = this.phrase();
         } else if (this.isDigit(la)) {
@@ -136,11 +138,27 @@ class QueryLexer {
         return token;
     }
 
+    isKeyword(keyword: string): boolean {
+        for (var i = 0; i < keyword.length; i++) {
+            if (this.la(i) !== keyword[i]) {
+                return false;
+            }
+        }
+        // be sure that it is not a prefix of something else
+        return this.isWhitespace(this.la(i)) || this.la(i) === null;
+    }
+
     or() {
         var startPos = this.pos;
-        this.consume();
+        this.consume(2);
         this.consume();
         return new Token(this.input, TokenType.OR, startPos, this.pos);
+    }
+
+    and() {
+        var startPos = this.pos;
+        this.consume(3);
+        return new Token(this.input, TokenType.AND, startPos, this.pos);
     }
 
     whitespace() {
@@ -184,8 +202,8 @@ class QueryLexer {
         return '\n\r \t'.indexOf(char) !== -1;
     }
 
-    consume() {
-        this.pos++;
+    consume(n: number = 1) {
+        this.pos += n;
     }
 
     la(la: number = 0): string {

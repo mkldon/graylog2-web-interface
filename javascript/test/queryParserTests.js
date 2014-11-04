@@ -45,7 +45,7 @@ describe('Query Parser', function () {
         expectIdentityDump(query);
     });
 
-    it('can parse an or expression', function () {
+    it('can parse an OR expression', function () {
         var query = "login OR submit";
         var parser = new QueryParser(query);
         var ast = parser.parse();
@@ -58,11 +58,6 @@ describe('Query Parser', function () {
         expect(ast.right instanceof TermAST).toBeTruthy();
 
         expectIdentityDump(query);
-        var dumpVisitor = new queryParser.DumpVisitor();
-        dumpVisitor.visit(ast);
-        var dumped = dumpVisitor.result();
-        expect(dumped).toBe("login OR submit");
-
     });
 
     it('preserves whitespace on dump of simple expression', function () {
@@ -74,5 +69,22 @@ describe('Query Parser', function () {
         var query = "  login  OR  \n \t  submit   ";
         expectIdentityDump(query);
     });
+
+    it('can parse an AND expression', function () {
+        var query = "login AND submit";
+        var parser = new QueryParser(query);
+        var ast = parser.parse();
+        expect(parser.error).toBeNull();
+        expect(ast instanceof ExprAST).toBeTruthy();
+        expect(ast.left instanceof TermAST).toBeTruthy();
+        expect(ast.left.token().type).toBe(TokenType.TERM);
+
+        expect(ast.op.type).toBe(TokenType.AND);
+        expect(ast.right instanceof TermAST).toBeTruthy();
+
+        expectIdentityDump(query);
+    });
+
+
 });
 

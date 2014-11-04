@@ -132,8 +132,11 @@ var QueryLexer = (function () {
         if (this.isWhitespace(la)) {
             token = this.whitespace();
         }
-        else if (la === 'O' && this.la(1) === 'R' && (this.isWhitespace(this.la(2)) || this.la(2) === null)) {
+        else if (this.isKeyword("OR")) {
             token = this.or();
+        }
+        else if (this.isKeyword("AND")) {
+            token = this.and();
         }
         else if (la === '"') {
             token = this.phrase();
@@ -144,11 +147,25 @@ var QueryLexer = (function () {
         // FIME: no matching token error instead of EOF
         return token;
     };
+    QueryLexer.prototype.isKeyword = function (keyword) {
+        for (var i = 0; i < keyword.length; i++) {
+            if (this.la(i) !== keyword[i]) {
+                return false;
+            }
+        }
+        // be sure that it is not a prefix of something else
+        return this.isWhitespace(this.la(i)) || this.la(i) === null;
+    };
     QueryLexer.prototype.or = function () {
         var startPos = this.pos;
-        this.consume();
+        this.consume(2);
         this.consume();
         return new Token(this.input, 5 /* OR */, startPos, this.pos);
+    };
+    QueryLexer.prototype.and = function () {
+        var startPos = this.pos;
+        this.consume(3);
+        return new Token(this.input, 4 /* AND */, startPos, this.pos);
     };
     QueryLexer.prototype.whitespace = function () {
         var startPos = this.pos;
@@ -186,8 +203,9 @@ var QueryLexer = (function () {
     QueryLexer.prototype.isWhitespace = function (char) {
         return '\n\r \t'.indexOf(char) !== -1;
     };
-    QueryLexer.prototype.consume = function () {
-        this.pos++;
+    QueryLexer.prototype.consume = function (n) {
+        if (n === void 0) { n = 1; }
+        this.pos += n;
     };
     QueryLexer.prototype.la = function (la) {
         if (la === void 0) { la = 0; }
