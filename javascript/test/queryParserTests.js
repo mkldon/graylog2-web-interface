@@ -65,12 +65,14 @@ describe('Query Parser', function () {
 
     });
 
-    //it('preserves whitespace on dump', function () {
-    //    var query = "  login  OR  \n \t  submit   ";
-    //    expectIdentityDump(query);
-    //    var query = " login ";
-    //    expectIdentityDump(query);
-    //});
+    it('preserves whitespace on dump of simple expression', function () {
+        var query = " login ";
+        expectIdentityDump(query);
+    });
 
+    it('preserves whitespace on dump of complex expression', function () {
+        var query = "  login  OR  \n \t  submit   ";
+        expectIdentityDump(query);
+    });
 });
 

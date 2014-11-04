@@ -15,18 +15,28 @@ export class DumpVisitor implements Visitor {
             return;
         } else if (ast instanceof ExprAST) {
             var expr = <ExprAST>ast;
+            this.dumpPrefix(ast);
             this.visit(expr.left);
-            this.dumpWithPrefixAndSuffix(ast);
+            this.dumpToken(ast.token());
             this.visit(expr.right);
+            this.dumpSuffix(ast);
         } else if (ast instanceof BaseAST) {
             this.dumpWithPrefixAndSuffix(ast);
         }
     }
 
     private dumpWithPrefixAndSuffix(ast: AST) {
-        ast.hiddenPrefixTokens().forEach((prefix) => this.dumpToken(prefix));
+        this.dumpPrefix(ast);
         this.dumpToken(ast.token());
+        this.dumpSuffix(ast);
+    }
+
+    private dumpSuffix(ast) {
         ast.hiddenSuffixTokens().forEach((suffix) => this.dumpToken(suffix));
+    }
+
+    private dumpPrefix(ast) {
+        ast.hiddenPrefixTokens().forEach((prefix) => this.dumpToken(prefix));
     }
     private dumpToken(token: Token) {
         token !== null && this.buffer.push(token.asString());
@@ -246,9 +256,9 @@ export class QueryParser {
         // FIXME: prefix gets lost on complex expression
         var prefix = this.skipWS();
         ast = this.expr();
-        ast.hiddenPrefix = prefix;
-        // FIXME: Might overwrite the an already existing suffix set in expr()
-        ast.hiddenSuffix  = this.skipWS();
+        ast.hiddenPrefix = ast.hiddenPrefix.merge(prefix);
+        var trailingSuffix: Immutable.List<Token> = this.skipWS();
+        ast.hiddenSuffix = ast.hiddenSuffix.merge(trailingSuffix);
         return ast;
     }
 

@@ -17,19 +17,28 @@ var DumpVisitor = (function () {
         }
         else if (ast instanceof ExprAST) {
             var expr = ast;
+            this.dumpPrefix(ast);
             this.visit(expr.left);
-            this.dumpWithPrefixAndSuffix(ast);
+            this.dumpToken(ast.token());
             this.visit(expr.right);
+            this.dumpSuffix(ast);
         }
         else if (ast instanceof BaseAST) {
             this.dumpWithPrefixAndSuffix(ast);
         }
     };
     DumpVisitor.prototype.dumpWithPrefixAndSuffix = function (ast) {
+        this.dumpPrefix(ast);
+        this.dumpToken(ast.token());
+        this.dumpSuffix(ast);
+    };
+    DumpVisitor.prototype.dumpSuffix = function (ast) {
+        var _this = this;
+        ast.hiddenSuffixTokens().forEach(function (suffix) { return _this.dumpToken(suffix); });
+    };
+    DumpVisitor.prototype.dumpPrefix = function (ast) {
         var _this = this;
         ast.hiddenPrefixTokens().forEach(function (prefix) { return _this.dumpToken(prefix); });
-        this.dumpToken(ast.token());
-        ast.hiddenSuffixTokens().forEach(function (suffix) { return _this.dumpToken(suffix); });
     };
     DumpVisitor.prototype.dumpToken = function (token) {
         token !== null && this.buffer.push(token.asString());
@@ -236,9 +245,9 @@ var QueryParser = (function () {
         // FIXME: prefix gets lost on complex expression
         var prefix = this.skipWS();
         ast = this.expr();
-        ast.hiddenPrefix = prefix;
-        // FIXME: Might overwrite the an already existing suffix set in expr()
-        ast.hiddenSuffix = this.skipWS();
+        ast.hiddenPrefix = ast.hiddenPrefix.merge(prefix);
+        var trailingSuffix = this.skipWS();
+        ast.hiddenSuffix = ast.hiddenSuffix.merge(trailingSuffix);
         return ast;
     };
     QueryParser.prototype.expr = function () {
