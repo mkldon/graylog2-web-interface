@@ -64,16 +64,21 @@ class BaseAST implements AST {
 
     hiddenPrefixTokens() {
         return this.hiddenPrefix;
-
     }
 
     /* abstract */
     token(): Token {
-        return undefined;
+        throw new Error("Call of abstract method");
     }
 
     hiddenSuffixTokens() {
         return this.hiddenSuffix;
+    }
+}
+
+export class ErrorAST extends BaseAST implements AST {
+    token(): Token {
+        return null;
     }
 }
 
@@ -103,11 +108,15 @@ export class TermAST extends BaseAST implements AST {
 }
 
 export class Token {
-    constructor(private input: string, public type: TokenType, private beginPos: number, private endPos: number) {
+    constructor(private input: string, public type: TokenType, public beginPos: number, public endPos: number) {
     }
 
     asString() {
         return this.input.substring(this.beginPos, this.endPos);
+    }
+
+    toString() {
+        return this.asString();
     }
 }
 
@@ -223,7 +232,7 @@ export interface ErrorObject {
 export class QueryParser {
     private lexer: QueryLexer;
     private tokenBuffer: Array<Token>;
-    public error: ErrorObject = null;
+    public errors = Immutable.List.of<ErrorObject>();
 
     constructor(private input: string) {
         this.lexer = new QueryLexer(input);
@@ -247,12 +256,21 @@ export class QueryParser {
     }
 
     private skipWS(): Immutable.List<Token> {
-        return this.syncTo(TokenType.WS);
+        return this.syncWhile(TokenType.WS);
+    }
+
+    private syncWhile(syncWhile: TokenType): Immutable.List<Token> {
+        var skippedTokens = Immutable.List.of<Token>().asMutable();
+        while (this.la().type === syncWhile) {
+            skippedTokens.push(this.la());
+            this.consume();
+        }
+        return skippedTokens.asImmutable();
     }
 
     private syncTo(syncTo: TokenType): Immutable.List<Token> {
         var skippedTokens = Immutable.List.of<Token>().asMutable();
-        while (this.la().type === syncTo) {
+        while (this.la().type !== TokenType.EOF && this.la().type !== syncTo) {
             skippedTokens.push(this.la());
             this.consume();
         }
@@ -261,15 +279,23 @@ export class QueryParser {
 
     // TODO: Do we rather want to abort the parse here? Send the error?
     private unexpectedToken(syncTo: TokenType) {
-        this.error = {
-            position: this.lexer.pos,
+        this.errors = this.errors.push({
+            position: this.la().beginPos,
             message: "Unexpected input"
-        };
+        });
+        this.syncTo(syncTo);
+    }
+
+    private missingToken(syncTo: TokenType, tokenName: string) {
+        this.errors = this.errors.push({
+            position: this.la().beginPos,
+            message: "Missing " + tokenName
+        });
         this.syncTo(syncTo);
     }
 
     parse(): AST {
-        this.error = null;
+        this.errors = this.errors.clear();
         var ast;
         // FIXME: prefix gets lost on complex expression
         var prefix = this.skipWS();
@@ -280,13 +306,18 @@ export class QueryParser {
         return ast;
     }
 
+    //exprs(): BaseAST {
+    //
+    //}
+
     expr(): BaseAST {
         var left: TermAST = null;
         var op: Token = null;
         var right: BaseAST = null;
 
         // left
-        switch (this.la().type) {
+        var la = this.la();
+        switch (la.type) {
             case TokenType.TERM:
                 left = this.term();
                 break;
@@ -298,25 +329,33 @@ export class QueryParser {
                 break;
         }
         left.hiddenSuffix = this.skipWS();
-        if (this.la().type === TokenType.EOF) {
+
+        if (!this.isOperator()) {
             return left;
         } else {
-            // op
-            switch (this.la().type) {
-                case TokenType.OR:
-                case TokenType.AND:
-                    op = this.la();
-                    this.consume();
-                    break;
-                default:
-                    this.unexpectedToken(TokenType.EOF);
-                    break;
-            }
+            op = this.la();
+            this.consume();
             var prefix = this.skipWS();
-            right = this.expr();
-            right.hiddenPrefix = prefix;
-            return new ExprAST(left, op, right);
+            if (this.isExpr()) {
+                right = this.expr();
+                right.hiddenPrefix = prefix;
+                return new ExprAST(left, op, right);
+            } else {
+                this.missingToken(TokenType.EOF, "right side of expression");
+            }
         }
+    }
+
+    isFirstOf(...tokenTypes: TokenType[]) {
+        return tokenTypes.some((tokenType) => this.la().type === tokenType);
+    }
+
+    isExpr() {
+        return this.isFirstOf(TokenType.TERM, TokenType.PHRASE);
+    }
+
+    isOperator() {
+        return this.isFirstOf(TokenType.OR, TokenType.AND);
     }
 
     term() {

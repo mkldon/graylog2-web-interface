@@ -3,12 +3,17 @@
 describe('Query Parser', function () {
     var queryParser, TermAST, Token, QueryParser, TokenType;
 
+    var expectNoErrors = function (parser) {
+        expect(parser.errors.size).toBe(0);
+    };
+
     function expectIdentityDump(query) {
         var parser = new QueryParser(query);
         var ast = parser.parse();
         var dumpVisitor = new queryParser.DumpVisitor();
         dumpVisitor.visit(ast);
         var dumped = dumpVisitor.result();
+        expectNoErrors(parser);
         expect(dumped).toBe(query);
     }
 
@@ -24,7 +29,7 @@ describe('Query Parser', function () {
         var query = "login";
         var parser = new QueryParser(query);
         var ast = parser.parse();
-        expect(parser.error).toBeNull();
+        expectNoErrors(parser);
         expect(ast instanceof TermAST).toBeTruthy();
         expect(ast.token() instanceof Token).toBeTruthy();
         expect(ast.token().type).toBe(TokenType.TERM);
@@ -32,11 +37,16 @@ describe('Query Parser', function () {
         expectIdentityDump(query);
     });
 
+    //it('can parse two terms', function () {
+    //    var query = "login submit";
+    //    expectIdentityDump(query);
+    //});
+
     it('can parse a phrase', function () {
         var query = '"login now"';
         var parser = new QueryParser(query);
         var ast = parser.parse();
-        expect(parser.error).toBeNull();
+        expectNoErrors(parser);
         expect(ast instanceof TermAST).toBeTruthy();
         expect(ast.phrase).toBeTruthy();
         expect(ast.token() instanceof Token).toBeTruthy();
@@ -49,7 +59,7 @@ describe('Query Parser', function () {
         var query = "login OR submit";
         var parser = new QueryParser(query);
         var ast = parser.parse();
-        expect(parser.error).toBeNull();
+        expectNoErrors(parser);
         expect(ast instanceof ExprAST).toBeTruthy();
         expect(ast.left instanceof TermAST).toBeTruthy();
         expect(ast.left.token().type).toBe(TokenType.TERM);
@@ -74,7 +84,7 @@ describe('Query Parser', function () {
         var query = "login AND submit";
         var parser = new QueryParser(query);
         var ast = parser.parse();
-        expect(parser.error).toBeNull();
+        expectNoErrors(parser);
         expect(ast instanceof ExprAST).toBeTruthy();
         expect(ast.left instanceof TermAST).toBeTruthy();
         expect(ast.left.token().type).toBe(TokenType.TERM);
@@ -85,6 +95,13 @@ describe('Query Parser', function () {
         expectIdentityDump(query);
     });
 
-
+    /*
+    it('reports an error when right side of AND is missing', function () {
+        var query = "login AND";
+        var parser = new QueryParser(query);
+        var ast = parser.parse();
+        expect(parser.error).toBeNull();
+    });
+*/
 });
 
