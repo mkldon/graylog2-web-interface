@@ -12,10 +12,17 @@ var DumpVisitor = (function () {
         this.buffer = [];
     }
     DumpVisitor.prototype.visit = function (ast) {
+        var _this = this;
         if (ast === null) {
             return;
         }
-        else if (ast instanceof ExprAST) {
+        else if (ast instanceof ExpressionListAST) {
+            this.dumpPrefix(ast);
+            var exprList = ast;
+            exprList.expressions.forEach(function (expr) { return _this.visit(expr); });
+            this.dumpSuffix(ast);
+        }
+        else if (ast instanceof ExpressionAST) {
             var expr = ast;
             this.dumpPrefix(ast);
             this.visit(expr.left);
@@ -23,7 +30,7 @@ var DumpVisitor = (function () {
             this.visit(expr.right);
             this.dumpSuffix(ast);
         }
-        else if (ast instanceof BaseAST) {
+        else if (ast instanceof TermAST) {
             this.dumpWithPrefixAndSuffix(ast);
         }
     };
@@ -67,18 +74,14 @@ var BaseAST = (function () {
     BaseAST.prototype.hiddenPrefixTokens = function () {
         return this.hiddenPrefix;
     };
-    /* abstract */
-    BaseAST.prototype.token = function () {
-        throw new Error("Call of abstract method");
-    };
     BaseAST.prototype.hiddenSuffixTokens = function () {
         return this.hiddenSuffix;
     };
     return BaseAST;
 })();
-var ExprAST = (function (_super) {
-    __extends(ExprAST, _super);
-    function ExprAST(left, op, right) {
+var ExpressionAST = (function (_super) {
+    __extends(ExpressionAST, _super);
+    function ExpressionAST(left, op, right) {
         _super.call(this);
         this.left = left;
         this.op = op;
@@ -87,12 +90,12 @@ var ExprAST = (function (_super) {
         this.right = right;
         this.op = op;
     }
-    ExprAST.prototype.token = function () {
+    ExpressionAST.prototype.token = function () {
         return this.op;
     };
-    return ExprAST;
+    return ExpressionAST;
 })(BaseAST);
-exports.ExprAST = ExprAST;
+exports.ExpressionAST = ExpressionAST;
 var TermAST = (function (_super) {
     __extends(TermAST, _super);
     function TermAST(term, phrase) {
@@ -107,6 +110,23 @@ var TermAST = (function (_super) {
     return TermAST;
 })(BaseAST);
 exports.TermAST = TermAST;
+var ExpressionListAST = (function (_super) {
+    __extends(ExpressionListAST, _super);
+    function ExpressionListAST() {
+        var expressions = [];
+        for (var _i = 0; _i < arguments.length; _i++) {
+            expressions[_i - 0] = arguments[_i];
+        }
+        _super.call(this);
+        this.expressions = Immutable.List.of();
+        this.expressions = this.expressions.merge(expressions);
+    }
+    ExpressionListAST.prototype.add = function (expr) {
+        this.expressions = this.expressions.push(expr);
+    };
+    return ExpressionListAST;
+})(BaseAST);
+exports.ExpressionListAST = ExpressionListAST;
 var Token = (function () {
     function Token(input, type, beginPos, endPos) {
         this.input = input;
@@ -280,15 +300,27 @@ var QueryParser = (function () {
         var ast;
         // FIXME: prefix gets lost on complex expression
         var prefix = this.skipWS();
-        ast = this.expr();
+        ast = this.exprs();
         ast.hiddenPrefix = ast.hiddenPrefix.merge(prefix);
         var trailingSuffix = this.skipWS();
         ast.hiddenSuffix = ast.hiddenSuffix.merge(trailingSuffix);
         return ast;
     };
-    //exprs(): BaseAST {
-    //
-    //}
+    QueryParser.prototype.exprs = function () {
+        var expressionList = new ExpressionListAST();
+        var expr = this.expr();
+        if (!this.isExpr()) {
+            return expr;
+        }
+        else {
+            expressionList.add(expr);
+            while (this.isExpr()) {
+                expr = this.expr();
+                expressionList.add(expr);
+            }
+            return expressionList;
+        }
+    };
     QueryParser.prototype.expr = function () {
         var left = null;
         var op = null;
@@ -321,7 +353,7 @@ var QueryParser = (function () {
             else {
                 this.missingToken(0 /* EOF */, "right side of expression");
             }
-            return new ExprAST(left, op, right);
+            return new ExpressionAST(left, op, right);
         }
     };
     QueryParser.prototype.isFirstOf = function () {

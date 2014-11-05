@@ -37,10 +37,10 @@ describe('Query Parser', function () {
         expectIdentityDump(query);
     });
 
-    //it('can parse two terms', function () {
-    //    var query = "login submit";
-    //    expectIdentityDump(query);
-    //});
+    it('can parse two terms', function () {
+        var query = "login submit";
+        expectIdentityDump(query);
+    });
 
     it('can parse a phrase', function () {
         var query = '"login now"';
@@ -55,12 +55,27 @@ describe('Query Parser', function () {
         expectIdentityDump(query);
     });
 
+    it('can parse a phrase and a term', function () {
+        var query = '"login now" submit';
+        expectIdentityDump(query);
+    });
+
+    it('can parse a term and a phrase', function () {
+        var query = 'submit "login now"';
+        expectIdentityDump(query);
+    });
+
+    it('can parse many terms with ws', function () {
+        var query = '  submit  "login now" logout ';
+        expectIdentityDump(query);
+    });
+
     it('can parse an OR expression', function () {
         var query = "login OR submit";
         var parser = new QueryParser(query);
         var ast = parser.parse();
         expectNoErrors(parser);
-        expect(ast instanceof ExprAST).toBeTruthy();
+        expect(ast instanceof ExpressionAST).toBeTruthy();
         expect(ast.left instanceof TermAST).toBeTruthy();
         expect(ast.left.token().type).toBe(TokenType.TERM);
 
@@ -85,7 +100,7 @@ describe('Query Parser', function () {
         var parser = new QueryParser(query);
         var ast = parser.parse();
         expectNoErrors(parser);
-        expect(ast instanceof ExprAST).toBeTruthy();
+        expect(ast instanceof ExpressionAST).toBeTruthy();
         expect(ast.left instanceof TermAST).toBeTruthy();
         expect(ast.left.token().type).toBe(TokenType.TERM);
 

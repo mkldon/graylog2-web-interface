@@ -13,19 +13,24 @@ export class DumpVisitor implements Visitor {
     visit(ast: AST) {
         if (ast === null) {
             return;
-        } else if (ast instanceof ExprAST) {
-            var expr = <ExprAST>ast;
+        } else if (ast instanceof ExpressionListAST) {
+            this.dumpPrefix(ast);
+            var exprList = <ExpressionListAST>ast;
+            exprList.expressions.forEach((expr) => this.visit(expr));
+            this.dumpSuffix(ast);
+        } else if (ast instanceof ExpressionAST) {
+            var expr = <ExpressionAST>ast;
             this.dumpPrefix(ast);
             this.visit(expr.left);
             this.dumpToken(ast.token());
             this.visit(expr.right);
             this.dumpSuffix(ast);
-        } else if (ast instanceof BaseAST) {
+        } else if (ast instanceof TermAST) {
             this.dumpWithPrefixAndSuffix(ast);
         }
     }
 
-    private dumpWithPrefixAndSuffix(ast: AST) {
+    private dumpWithPrefixAndSuffix(ast: TermAST) {
         this.dumpPrefix(ast);
         this.dumpToken(ast.token());
         this.dumpSuffix(ast);
@@ -54,7 +59,6 @@ export enum TokenType {
 
 export interface AST {
     hiddenPrefixTokens(): Immutable.List<Token>;
-    token(): Token;
     hiddenSuffixTokens(): Immutable.List<Token>;
 }
 
@@ -66,17 +70,12 @@ class BaseAST implements AST {
         return this.hiddenPrefix;
     }
 
-    /* abstract */
-    token(): Token {
-        throw new Error("Call of abstract method");
-    }
-
     hiddenSuffixTokens() {
         return this.hiddenSuffix;
     }
 }
 
-export class ExprAST extends BaseAST implements AST {
+export class ExpressionAST extends BaseAST implements AST {
     constructor(public left: TermAST, public op: Token,
                 public right: AST) {
         super();
@@ -98,6 +97,18 @@ export class TermAST extends BaseAST implements AST {
 
     token() {
         return this.term;
+    }
+}
+
+export class ExpressionListAST extends BaseAST implements AST {
+    public expressions = Immutable.List.of<BaseAST>();
+    constructor (...expressions: BaseAST[]) {
+        super();
+        this.expressions = this.expressions.merge(expressions);
+    }
+
+    add(expr: BaseAST) {
+        this.expressions = this.expressions.push(expr);
     }
 }
 
@@ -293,16 +304,28 @@ export class QueryParser {
         var ast;
         // FIXME: prefix gets lost on complex expression
         var prefix = this.skipWS();
-        ast = this.expr();
+        ast = this.exprs();
         ast.hiddenPrefix = ast.hiddenPrefix.merge(prefix);
         var trailingSuffix: Immutable.List<Token> = this.skipWS();
         ast.hiddenSuffix = ast.hiddenSuffix.merge(trailingSuffix);
         return ast;
     }
 
-    //exprs(): BaseAST {
-    //
-    //}
+    exprs(): AST {
+        var expressionList = new ExpressionListAST();
+        var expr = this.expr();
+
+        if (!this.isExpr()) {
+            return expr;
+        } else {
+            expressionList.add(expr);
+            while (this.isExpr()) {
+                expr = this.expr();
+                expressionList.add(expr);
+            }
+            return expressionList;
+        }
+    }
 
     expr(): BaseAST {
         var left: TermAST = null;
@@ -336,7 +359,7 @@ export class QueryParser {
             } else {
                 this.missingToken(TokenType.EOF, "right side of expression");
             }
-            return new ExprAST(left, op, right);
+            return new ExpressionAST(left, op, right);
         }
     }
 
