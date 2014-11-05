@@ -6,6 +6,7 @@ var __extends = this.__extends || function (d, b) {
     __.prototype = b.prototype;
     d.prototype = new __();
 };
+// parser for http://lucene.apache.org/core/2_9_4/queryparsersyntax.html
 var Immutable = require('immutable');
 var DumpVisitor = (function () {
     function DumpVisitor() {
@@ -26,7 +27,7 @@ var DumpVisitor = (function () {
             var expr = ast;
             this.dumpPrefix(ast);
             this.visit(expr.left);
-            this.dumpToken(ast.token());
+            this.dumpToken(expr.op);
             this.visit(expr.right);
             this.dumpSuffix(ast);
         }
@@ -36,7 +37,11 @@ var DumpVisitor = (function () {
     };
     DumpVisitor.prototype.dumpWithPrefixAndSuffix = function (ast) {
         this.dumpPrefix(ast);
-        this.dumpToken(ast.token());
+        if (ast.field) {
+            this.dumpToken(ast.field);
+            this.buffer.push(":");
+        }
+        this.dumpToken(ast.term);
         this.dumpSuffix(ast);
     };
     DumpVisitor.prototype.dumpSuffix = function (ast) {
@@ -64,6 +69,7 @@ exports.DumpVisitor = DumpVisitor;
     TokenType[TokenType["AND"] = 4] = "AND";
     TokenType[TokenType["OR"] = 5] = "OR";
     TokenType[TokenType["NOT"] = 6] = "NOT";
+    TokenType[TokenType["COLON"] = 7] = "COLON";
 })(exports.TokenType || (exports.TokenType = {}));
 var TokenType = exports.TokenType;
 var BaseAST = (function () {
@@ -90,22 +96,18 @@ var ExpressionAST = (function (_super) {
         this.right = right;
         this.op = op;
     }
-    ExpressionAST.prototype.token = function () {
-        return this.op;
-    };
     return ExpressionAST;
 })(BaseAST);
 exports.ExpressionAST = ExpressionAST;
 var TermAST = (function (_super) {
     __extends(TermAST, _super);
-    function TermAST(term, phrase) {
+    function TermAST(term, field) {
         _super.call(this);
         this.term = term;
-        this.phrase = phrase;
-        this.phrase = (phrase !== undefined && phrase) || term.asString().indexOf(" ") !== -1;
+        this.field = field;
     }
-    TermAST.prototype.token = function () {
-        return this.term;
+    TermAST.prototype.isPhrase = function () {
+        return this.term.asString().indexOf(" ") !== -1;
     };
     return TermAST;
 })(BaseAST);
@@ -137,9 +139,6 @@ var Token = (function () {
     Token.prototype.asString = function () {
         return this.input.substring(this.beginPos, this.endPos);
     };
-    Token.prototype.toString = function () {
-        return this.asString();
-    };
     return Token;
 })();
 exports.Token = Token;
@@ -167,6 +166,11 @@ var QueryLexer = (function () {
         else if (this.isDigit(la)) {
             token = this.term();
         }
+        else if (la === ':') {
+            var startPos = this.pos;
+            this.consume();
+            token = new Token(this.input, 7 /* COLON */, startPos, this.pos);
+        }
         // FIME: no matching token error instead of EOF
         return token;
     };
@@ -182,7 +186,6 @@ var QueryLexer = (function () {
     QueryLexer.prototype.or = function () {
         var startPos = this.pos;
         this.consume(2);
-        this.consume();
         return new Token(this.input, 5 /* OR */, startPos, this.pos);
     };
     QueryLexer.prototype.and = function () {
@@ -264,31 +267,44 @@ var QueryParser = (function () {
     QueryParser.prototype.skipWS = function () {
         return this.syncWhile(1 /* WS */);
     };
-    QueryParser.prototype.syncWhile = function (syncWhile) {
+    QueryParser.prototype.syncWhile = function () {
+        var _this = this;
+        var syncWhile = [];
+        for (var _i = 0; _i < arguments.length; _i++) {
+            syncWhile[_i - 0] = arguments[_i];
+        }
         var skippedTokens = Immutable.List.of().asMutable();
-        while (this.la().type === syncWhile) {
+        while (syncWhile.some(function (type) { return type === _this.la().type; })) {
             skippedTokens.push(this.la());
             this.consume();
         }
         return skippedTokens.asImmutable();
     };
     QueryParser.prototype.syncTo = function (syncTo) {
+        var _this = this;
         var skippedTokens = Immutable.List.of().asMutable();
-        while (this.la().type !== 0 /* EOF */ && this.la().type !== syncTo) {
+        while (this.la().type !== 0 /* EOF */ && syncTo.every(function (type) { return type !== _this.la().type; })) {
             skippedTokens.push(this.la());
             this.consume();
         }
         return skippedTokens.asImmutable();
     };
-    // TODO: Do we rather want to abort the parse here? Send the error?
-    QueryParser.prototype.unexpectedToken = function (syncTo) {
+    QueryParser.prototype.unexpectedToken = function () {
+        var syncTo = [];
+        for (var _i = 0; _i < arguments.length; _i++) {
+            syncTo[_i - 0] = arguments[_i];
+        }
         this.errors = this.errors.push({
             position: this.la().beginPos,
             message: "Unexpected input"
         });
         this.syncTo(syncTo);
     };
-    QueryParser.prototype.missingToken = function (syncTo, tokenName) {
+    QueryParser.prototype.missingToken = function (tokenName) {
+        var syncTo = [];
+        for (var _i = 1; _i < arguments.length; _i++) {
+            syncTo[_i - 1] = arguments[_i];
+        }
         this.errors = this.errors.push({
             position: this.la().beginPos,
             message: "Missing " + tokenName
@@ -298,7 +314,6 @@ var QueryParser = (function () {
     QueryParser.prototype.parse = function () {
         this.errors = this.errors.clear();
         var ast;
-        // FIXME: prefix gets lost on complex expression
         var prefix = this.skipWS();
         ast = this.exprs();
         ast.hiddenPrefix = ast.hiddenPrefix.merge(prefix);
@@ -329,10 +344,8 @@ var QueryParser = (function () {
         var la = this.la();
         switch (la.type) {
             case 2 /* TERM */:
-                left = this.term();
-                break;
             case 3 /* PHRASE */:
-                left = this.phrase();
+                left = this.termOrPhrase();
                 break;
             default:
                 this.unexpectedToken(0 /* EOF */);
@@ -351,7 +364,7 @@ var QueryParser = (function () {
                 right.hiddenPrefix = prefix;
             }
             else {
-                this.missingToken(0 /* EOF */, "right side of expression");
+                this.missingToken("right side of expression", 0 /* EOF */);
             }
             return new ExpressionAST(left, op, right);
         }
@@ -370,16 +383,23 @@ var QueryParser = (function () {
     QueryParser.prototype.isOperator = function () {
         return this.isFirstOf(5 /* OR */, 4 /* AND */);
     };
-    QueryParser.prototype.term = function () {
-        var token = this.la();
+    QueryParser.prototype.termOrPhrase = function () {
+        var termOrField = this.la();
         this.consume();
-        var ast = new TermAST(token);
-        return ast;
-    };
-    QueryParser.prototype.phrase = function () {
-        var token = this.la();
-        this.consume();
-        var ast = new TermAST(token, true);
+        // no ws allowed here
+        if (this.la().type === 7 /* COLON */) {
+            this.consume();
+            if (this.la().type === 2 /* TERM */ || this.la().type === 3 /* PHRASE */) {
+                var term = this.la();
+                this.consume();
+                var ast = new TermAST(term, termOrField);
+                return ast;
+            }
+            else {
+                this.missingToken("term or phrase for field", 0 /* EOF */);
+            }
+        }
+        var ast = new TermAST(termOrField);
         return ast;
     };
     return QueryParser;

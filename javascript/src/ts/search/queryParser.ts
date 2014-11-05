@@ -1,6 +1,8 @@
 ///<reference path='./../../../node_modules/immutable/dist/Immutable.d.ts'/>
 'use strict';
 
+// parser for http://lucene.apache.org/core/2_9_4/queryparsersyntax.html
+
 import Immutable = require('immutable');
 
 export interface Visitor {
@@ -22,7 +24,7 @@ export class DumpVisitor implements Visitor {
             var expr = <ExpressionAST>ast;
             this.dumpPrefix(ast);
             this.visit(expr.left);
-            this.dumpToken(ast.token());
+            this.dumpToken(expr.op);
             this.visit(expr.right);
             this.dumpSuffix(ast);
         } else if (ast instanceof TermAST) {
@@ -32,7 +34,11 @@ export class DumpVisitor implements Visitor {
 
     private dumpWithPrefixAndSuffix(ast: TermAST) {
         this.dumpPrefix(ast);
-        this.dumpToken(ast.token());
+        if (ast.field) {
+            this.dumpToken(ast.field);
+            this.buffer.push(":");
+        }
+        this.dumpToken(ast.term);
         this.dumpSuffix(ast);
     }
 
@@ -54,7 +60,7 @@ export class DumpVisitor implements Visitor {
 }
 
 export enum TokenType {
-    EOF, WS, TERM, PHRASE, AND, OR, NOT
+    EOF, WS, TERM, PHRASE, AND, OR, NOT, COLON
 }
 
 export interface AST {
@@ -83,20 +89,15 @@ export class ExpressionAST extends BaseAST implements AST {
         this.right = right;
         this.op = op;
     }
-
-    token() {
-        return this.op;
-    }
 }
 
 export class TermAST extends BaseAST implements AST {
-    constructor(public term: Token, public phrase?: boolean) {
+    constructor(public term: Token, public field?: Token) {
         super();
-        this.phrase = (phrase !== undefined && phrase) || term.asString().indexOf(" ") !== -1;
     }
 
-    token() {
-        return this.term;
+    isPhrase() {
+        return this.term.asString().indexOf(" ") !== -1;
     }
 }
 
@@ -118,10 +119,6 @@ export class Token {
 
     asString() {
         return this.input.substring(this.beginPos, this.endPos);
-    }
-
-    toString() {
-        return this.asString();
     }
 }
 
@@ -147,6 +144,10 @@ class QueryLexer {
             token = this.phrase();
         } else if (this.isDigit(la)) {
             token = this.term();
+        } else if (la === ':') {
+            var startPos = this.pos;
+            this.consume();
+            token = new Token(this.input, TokenType.COLON, startPos, this.pos);
         }
         // FIME: no matching token error instead of EOF
         return token;
@@ -165,7 +166,6 @@ class QueryLexer {
     or() {
         var startPos = this.pos;
         this.consume(2);
-        this.consume();
         return new Token(this.input, TokenType.OR, startPos, this.pos);
     }
 
@@ -264,26 +264,25 @@ export class QueryParser {
         return this.syncWhile(TokenType.WS);
     }
 
-    private syncWhile(syncWhile: TokenType): Immutable.List<Token> {
+    private syncWhile(...syncWhile: TokenType[]): Immutable.List<Token> {
         var skippedTokens = Immutable.List.of<Token>().asMutable();
-        while (this.la().type === syncWhile) {
+        while (syncWhile.some((type) => type === this.la().type)) {
             skippedTokens.push(this.la());
             this.consume();
         }
         return skippedTokens.asImmutable();
     }
 
-    private syncTo(syncTo: TokenType): Immutable.List<Token> {
+    private syncTo(syncTo: TokenType[]): Immutable.List<Token> {
         var skippedTokens = Immutable.List.of<Token>().asMutable();
-        while (this.la().type !== TokenType.EOF && this.la().type !== syncTo) {
+        while (this.la().type !== TokenType.EOF && syncTo.every((type) => type !== this.la().type)) {
             skippedTokens.push(this.la());
             this.consume();
         }
         return skippedTokens.asImmutable();
     }
 
-    // TODO: Do we rather want to abort the parse here? Send the error?
-    private unexpectedToken(syncTo: TokenType) {
+    private unexpectedToken(...syncTo: TokenType[]) {
         this.errors = this.errors.push({
             position: this.la().beginPos,
             message: "Unexpected input"
@@ -291,7 +290,7 @@ export class QueryParser {
         this.syncTo(syncTo);
     }
 
-    private missingToken(syncTo: TokenType, tokenName: string) {
+    private missingToken(tokenName: string, ...syncTo: TokenType[]) {
         this.errors = this.errors.push({
             position: this.la().beginPos,
             message: "Missing " + tokenName
@@ -302,7 +301,6 @@ export class QueryParser {
     parse(): AST {
         this.errors = this.errors.clear();
         var ast;
-        // FIXME: prefix gets lost on complex expression
         var prefix = this.skipWS();
         ast = this.exprs();
         ast.hiddenPrefix = ast.hiddenPrefix.merge(prefix);
@@ -336,10 +334,8 @@ export class QueryParser {
         var la = this.la();
         switch (la.type) {
             case TokenType.TERM:
-                left = this.term();
-                break;
             case TokenType.PHRASE:
-                left = this.phrase();
+                left = this.termOrPhrase();
                 break;
             default:
                 this.unexpectedToken(TokenType.EOF);
@@ -357,7 +353,7 @@ export class QueryParser {
                 right = this.expr();
                 right.hiddenPrefix = prefix;
             } else {
-                this.missingToken(TokenType.EOF, "right side of expression");
+                this.missingToken("right side of expression", TokenType.EOF);
             }
             return new ExpressionAST(left, op, right);
         }
@@ -375,17 +371,22 @@ export class QueryParser {
         return this.isFirstOf(TokenType.OR, TokenType.AND);
     }
 
-    term() {
-        var token = this.la();
+    termOrPhrase() {
+        var termOrField = this.la();
         this.consume();
-        var ast = new TermAST(token);
-        return ast;
-    }
-
-    phrase() {
-        var token = this.la();
-        this.consume();
-        var ast = new TermAST(token, true);
+        // no ws allowed here
+        if (this.la().type === TokenType.COLON) {
+            this.consume();
+            if (this.la().type === TokenType.TERM || this.la().type === TokenType.PHRASE) {
+                var term = this.la();
+                this.consume();
+                var ast = new TermAST(term, termOrField);
+                return ast;
+            } else {
+                this.missingToken("term or phrase for field", TokenType.EOF);
+            }
+        }
+        var ast = new TermAST(termOrField);
         return ast;
     }
 }
