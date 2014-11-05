@@ -76,17 +76,6 @@ var BaseAST = (function () {
     };
     return BaseAST;
 })();
-var ErrorAST = (function (_super) {
-    __extends(ErrorAST, _super);
-    function ErrorAST() {
-        _super.apply(this, arguments);
-    }
-    ErrorAST.prototype.token = function () {
-        return null;
-    };
-    return ErrorAST;
-})(BaseAST);
-exports.ErrorAST = ErrorAST;
 var ExprAST = (function (_super) {
     __extends(ExprAST, _super);
     function ExprAST(left, op, right) {
@@ -328,11 +317,11 @@ var QueryParser = (function () {
             if (this.isExpr()) {
                 right = this.expr();
                 right.hiddenPrefix = prefix;
-                return new ExprAST(left, op, right);
             }
             else {
                 this.missingToken(0 /* EOF */, "right side of expression");
             }
+            return new ExprAST(left, op, right);
         }
     };
     QueryParser.prototype.isFirstOf = function () {

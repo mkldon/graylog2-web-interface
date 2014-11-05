@@ -95,13 +95,13 @@ describe('Query Parser', function () {
         expectIdentityDump(query);
     });
 
-    /*
     it('reports an error when right side of AND is missing', function () {
         var query = "login AND";
         var parser = new QueryParser(query);
         var ast = parser.parse();
-        expect(parser.error).toBeNull();
+        expect(parser.errors.size).toBe(1);
+        expect(parser.errors.get(0).message).toBe("Missing right side of expression");
+        expect(parser.errors.get(0).position).toBe(8);
     });
-*/
 });
 

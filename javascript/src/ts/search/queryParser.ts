@@ -76,12 +76,6 @@ class BaseAST implements AST {
     }
 }
 
-export class ErrorAST extends BaseAST implements AST {
-    token(): Token {
-        return null;
-    }
-}
-
 export class ExprAST extends BaseAST implements AST {
     constructor(public left: TermAST, public op: Token,
                 public right: AST) {
@@ -339,10 +333,10 @@ export class QueryParser {
             if (this.isExpr()) {
                 right = this.expr();
                 right.hiddenPrefix = prefix;
-                return new ExprAST(left, op, right);
             } else {
                 this.missingToken(TokenType.EOF, "right side of expression");
             }
+            return new ExprAST(left, op, right);
         }
     }
 
