@@ -171,29 +171,42 @@ var QueryLexer = (function () {
         this.eofToken = new Token(this.input, 0 /* EOF */, input.length - 1, input.length - 1);
     }
     QueryLexer.prototype.next = function () {
-        var token = this.eofToken;
+        var token;
         var la = this.la();
-        if (this.isWhitespace(la)) {
+        if (la === null) {
+            token = this.eofToken;
+        }
+        else if (this.isWhitespace(la)) {
             token = this.whitespace();
         }
-        else if (this.isKeyword("OR")) {
+        else if (this.isKeyword("OR") || this.isKeyword("||")) {
             token = this.or();
         }
-        else if (this.isKeyword("AND")) {
+        else if (this.isKeyword("AND") || this.isKeyword("&&")) {
             token = this.and();
         }
         else if (la === '"') {
             token = this.phrase();
-        }
-        else if (this.isDigit(la)) {
-            token = this.term();
         }
         else if (la === ':') {
             var startPos = this.pos;
             this.consume();
             token = new Token(this.input, 7 /* COLON */, startPos, this.pos);
         }
-        // FIME: no matching token error instead of EOF
+        else if (la[0] === '\\' && la.length === 1) {
+            // we have an escape character, but nothing that is escaped, we consider this an error
+            var startPos = this.pos;
+            this.consume();
+            token = new Token(this.input, 8 /* ERROR */, startPos, this.pos);
+        }
+        else if (this.isTermStart(la)) {
+            token = this.term();
+        }
+        else {
+            var startPos = this.pos;
+            this.consume();
+            token = new Token(this.input, 8 /* ERROR */, startPos, this.pos);
+        }
         return token;
     };
     QueryLexer.prototype.isKeyword = function (keyword) {
@@ -212,13 +225,13 @@ var QueryLexer = (function () {
     };
     QueryLexer.prototype.and = function () {
         var startPos = this.pos;
-        this.consume(3);
+        this.consume(this.la() === '&' ? 2 : 3);
         return new Token(this.input, 4 /* AND */, startPos, this.pos);
     };
     QueryLexer.prototype.whitespace = function () {
         var startPos = this.pos;
         var la = this.la();
-        while (la !== null && this.isWhitespace(la)) {
+        while (this.isWhitespace(la)) {
             this.consume();
             la = this.la();
         }
@@ -226,8 +239,10 @@ var QueryLexer = (function () {
     };
     QueryLexer.prototype.term = function () {
         var startPos = this.pos;
+        // consume start character
+        this.consume();
         var la = this.la();
-        while (la !== null && this.isDigit(la)) {
+        while (this.isTerm(la)) {
             this.consume();
             la = this.la();
         }
@@ -244,12 +259,26 @@ var QueryLexer = (function () {
         this.consume(); // skip ending "
         return new Token(this.input, 3 /* PHRASE */, startPos, this.pos);
     };
-    // TODO: handle escaping using state pattern
     QueryLexer.prototype.isDigit = function (char) {
         return char !== null && (('a' <= char && char <= 'z') || ('A' <= char && char <= 'Z') || ('0' <= char && char <= '9'));
     };
+    QueryLexer.prototype.isOneOf = function (set, char) {
+        return set.indexOf(char) !== -1;
+    };
     QueryLexer.prototype.isWhitespace = function (char) {
-        return '\n\r \t'.indexOf(char) !== -1;
+        return this.isOneOf(' \t\n\r\u3000', char);
+    };
+    QueryLexer.prototype.isSpecial = function (char) {
+        return this.isOneOf('+-!():^[]"{}~*?\\/', char);
+    };
+    QueryLexer.prototype.isTermStart = function (char) {
+        return char !== null && !this.isWhitespace(char) && !this.isSpecial(char);
+    };
+    QueryLexer.prototype.isTerm = function (char) {
+        return this.isTermStart(char) || this.isOneOf('+-', char);
+    };
+    QueryLexer.prototype.isEscaped = function (char) {
+        return char.length === 2 && char[0] === '\\';
     };
     QueryLexer.prototype.consume = function (n) {
         if (n === void 0) { n = 1; }
@@ -258,13 +287,18 @@ var QueryLexer = (function () {
     QueryLexer.prototype.la = function (la) {
         if (la === void 0) { la = 0; }
         var index = this.pos + la;
-        return (this.input.length <= index) ? null : this.input[index];
+        var char = (this.input.length <= index) ? null : this.input[index];
+        if (char === '\\') {
+            this.consume();
+            if (this.input.length <= index) {
+                var escapedChar = this.input[index];
+                char += escapedChar;
+            }
+        }
+        return char;
     };
     return QueryLexer;
 })();
-/**
- * Parser for http://lucene.apache.org/core/2_9_4/queryparsersyntax.html
- */
 var QueryParser = (function () {
     function QueryParser(input) {
         this.input = input;
@@ -337,7 +371,12 @@ var QueryParser = (function () {
         this.errors = [];
         var ast;
         var prefix = this.skipWS();
-        ast = this.exprs();
+        if (this.isExpr()) {
+            ast = this.exprs();
+        }
+        else {
+            ast = new MissingAST();
+        }
         ast.hiddenPrefix = ast.hiddenPrefix.concat(prefix);
         var trailingSuffix = this.skipWS();
         ast.hiddenSuffix = ast.hiddenSuffix.concat(trailingSuffix);
@@ -363,17 +402,13 @@ var QueryParser = (function () {
         var op = null;
         var right = null;
         // left
-        var la = this.la();
-        switch (la.type) {
-            case 2 /* TERM */:
-            case 3 /* PHRASE */:
-                left = this.termOrPhrase();
-                break;
-            default:
-                this.unexpectedToken(0 /* EOF */);
-                break;
+        if (this.isExpr()) {
+            left = this.termOrPhrase();
+            left.hiddenSuffix = left.hiddenSuffix.concat(this.skipWS());
         }
-        left.hiddenSuffix = left.hiddenSuffix.concat(this.skipWS());
+        else {
+            this.unexpectedToken(0 /* EOF */);
+        }
         if (!this.isOperator()) {
             return left;
         }

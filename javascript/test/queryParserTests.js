@@ -134,6 +134,36 @@ describe('Query Parser', function () {
         expectIdentityDump(query);
     });
 
+    it('can parse an && expression', function () {
+        var query = "login && submit";
+        var parser = new QueryParser(query);
+        var ast = parser.parse();
+        expectNoErrors(parser);
+        expect(ast instanceof ExpressionAST).toBeTruthy();
+        expect(ast.left instanceof TermAST).toBeTruthy();
+        expect(ast.left.term.type).toBe(TokenType.TERM);
+
+        expect(ast.op.type).toBe(TokenType.AND);
+        expect(ast.right instanceof TermAST).toBeTruthy();
+
+        expectIdentityDump(query);
+    });
+
+    it('can parse an || expression', function () {
+        var query = "login || submit";
+        var parser = new QueryParser(query);
+        var ast = parser.parse();
+        expectNoErrors(parser);
+        expect(ast instanceof ExpressionAST).toBeTruthy();
+        expect(ast.left instanceof TermAST).toBeTruthy();
+        expect(ast.left.term.type).toBe(TokenType.TERM);
+
+        expect(ast.op.type).toBe(TokenType.OR);
+        expect(ast.right instanceof TermAST).toBeTruthy();
+
+        expectIdentityDump(query);
+    });
+
     it('reports an error when right side of AND is missing', function () {
         var query = "login AND ";
         var parser = new QueryParser(query);
@@ -152,6 +182,38 @@ describe('Query Parser', function () {
         expect(parser.errors[0].message).toBe("Missing term or phrase for field");
         expect(parser.errors[0].position).toBe(8);
         expectIdentityDump(query, true);
+    });
+
+    xit('trailing escape character gives error, but can still reproduce', function () {
+        var query = '\\';
+        var parser = new QueryParser(query);
+        var ast = parser.parse();
+        expect(parser.errors.length).toBe(1);
+        expect(parser.errors[0].message).toBe("Missing term or phrase for field");
+        expect(parser.errors[0].position).toBe(8);
+        expectIdentityDump(query, true);
+    });
+
+    it('can parse empty query', function () {
+        var query = '';
+        expectIdentityDump(query);
+    });
+
+    it('can reproduce pure WS', function () {
+        var query = ' \n\t';
+        expectIdentityDump(query);
+    });
+
+    // none of those, really:
+    // +-!():^[]"{}~*?\\/
+    it('can parse everything except for ws and special characters as term', function () {
+        var query = ' @$%&§öäüß#=.;_<>°"';
+        expectIdentityDump(query);
+    });
+
+    it('can parse + and - literally inside term', function () {
+        var query = 'start+-end"';
+        expectIdentityDump(query);
     });
 
 });

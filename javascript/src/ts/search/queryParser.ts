@@ -1,8 +1,7 @@
 'use strict';
 
-// parser for http://lucene.apache.org/core/2_9_4/queryparsersyntax.html
-// http://www.lucenetutorial.com/lucene-query-syntax.html
-// Referecen to PEG grammar for the same task: https://raw.githubusercontent.com/polyfractal/elasticsearch-inquisitor/master/_site/js/vendor/lucene/lucene-query.grammar
+// parser for http://lucene.apache.org/core/4_10_2/queryparser/org/apache/lucene/queryparser/classic/package-summary.html#package_description
+// Reference to original lucene query parser https://svn.apache.org/repos/asf/lucene/dev/trunk/lucene/queryparser/src/java/org/apache/lucene/queryparser/classic/QueryParser.jj
 
 export interface Visitor {
     visit(ast: AST);
@@ -112,6 +111,7 @@ export class TermAST extends BaseAST implements AST {
 export class TermWithFieldAST extends TermAST implements AST {
     hiddenColonPrefix: Array<Token> = [];
     hiddenColonSuffix: Array<Token> = [];
+
     constructor(public field: Token, public colon: Token, term: Token) {
         super(term);
     }
@@ -120,7 +120,8 @@ export class TermWithFieldAST extends TermAST implements AST {
 
 export class ExpressionListAST extends BaseAST implements AST {
     public expressions = Array<BaseAST>();
-    constructor (...expressions: BaseAST[]) {
+
+    constructor(...expressions: BaseAST[]) {
         super();
         this.expressions = this.expressions.concat(expressions);
     }
@@ -133,6 +134,7 @@ export class ExpressionListAST extends BaseAST implements AST {
 export class Token {
     // for better readability
     public typeName: string;
+
     constructor(private input: string, public type: TokenType, public beginPos: number, public endPos: number) {
         this.typeName = TokenType[type];
     }
@@ -153,24 +155,34 @@ class QueryLexer {
     }
 
     next(): Token {
-        var token = this.eofToken;
+        var token;
         var la = this.la();
-        if (this.isWhitespace(la)) {
+        if (la === null) {
+            token = this.eofToken;
+        } else if (this.isWhitespace(la)) {
             token = this.whitespace();
-        } else if (this.isKeyword("OR")) {
+        } else if (this.isKeyword("OR") || this.isKeyword("||")) {
             token = this.or();
-        } else if (this.isKeyword("AND")) {
+        } else if (this.isKeyword("AND") || this.isKeyword("&&")) {
             token = this.and();
         } else if (la === '"') {
             token = this.phrase();
-        } else if (this.isDigit(la)) {
-            token = this.term();
         } else if (la === ':') {
             var startPos = this.pos;
             this.consume();
             token = new Token(this.input, TokenType.COLON, startPos, this.pos);
+        } else if (la[0] === '\\' && la.length === 1) {
+            // we have an escape character, but nothing that is escaped, we consider this an error
+            var startPos = this.pos;
+            this.consume();
+            token = new Token(this.input, TokenType.ERROR, startPos, this.pos);
+        } else if (this.isTermStart(la)) {
+            token = this.term();
+        } else {
+            var startPos = this.pos;
+            this.consume();
+            token = new Token(this.input, TokenType.ERROR, startPos, this.pos);
         }
-        // FIME: no matching token error instead of EOF
         return token;
     }
 
@@ -192,14 +204,14 @@ class QueryLexer {
 
     and() {
         var startPos = this.pos;
-        this.consume(3);
+        this.consume(this.la() === '&' ? 2 : 3);
         return new Token(this.input, TokenType.AND, startPos, this.pos);
     }
 
     whitespace() {
         var startPos = this.pos;
         var la = this.la();
-        while (la !== null && this.isWhitespace(la)) {
+        while (this.isWhitespace(la)) {
             this.consume();
             la = this.la();
         }
@@ -208,8 +220,10 @@ class QueryLexer {
 
     term() {
         var startPos = this.pos;
+        // consume start character
+        this.consume();
         var la = this.la();
-        while (la !== null && this.isDigit(la)) {
+        while (this.isTerm(la)) {
             this.consume();
             la = this.la();
         }
@@ -228,13 +242,32 @@ class QueryLexer {
         return new Token(this.input, TokenType.PHRASE, startPos, this.pos);
     }
 
-    // TODO: handle escaping using state pattern
     isDigit(char) {
         return char !== null && (('a' <= char && char <= 'z') || ('A' <= char && char <= 'Z') || ('0' <= char && char <= '9'));
     }
 
+    isOneOf(set: string, char: string) {
+        return set.indexOf(char) !== -1;
+    }
+
     isWhitespace(char) {
-        return '\n\r \t'.indexOf(char) !== -1;
+        return this.isOneOf(' \t\n\r\u3000', char);
+    }
+
+    isSpecial(char) {
+        return this.isOneOf('+-!():^[]"{}~*?\\/', char);
+    }
+
+    isTermStart(char) {
+        return char !== null && !this.isWhitespace(char) && !this.isSpecial(char);
+    }
+
+    isTerm(char) {
+        return this.isTermStart(char) || this.isOneOf('+-', char);
+    }
+
+    isEscaped(char) {
+        return char.length === 2 && char[0] === '\\';
     }
 
     consume(n: number = 1) {
@@ -243,7 +276,15 @@ class QueryLexer {
 
     la(la: number = 0): string {
         var index = this.pos + la;
-        return (this.input.length <= index) ? null : this.input[index];
+        var char = (this.input.length <= index) ? null : this.input[index];
+        if (char === '\\') {
+            this.consume();
+            if (this.input.length <= index) {
+                var escapedChar =this.input[index]
+                char += escapedChar;
+            }
+        }
+        return char;
     }
 }
 
@@ -252,9 +293,6 @@ export interface ErrorObject {
     message: string;
 }
 
-/**
- * Parser for http://lucene.apache.org/core/2_9_4/queryparsersyntax.html
- */
 export class QueryParser {
     private lexer: QueryLexer;
     private tokenBuffer: Array<Token>;
@@ -323,7 +361,11 @@ export class QueryParser {
         this.errors = [];
         var ast;
         var prefix = this.skipWS();
-        ast = this.exprs();
+        if (this.isExpr()) {
+            ast = this.exprs();
+        } else {
+            ast = new MissingAST();
+        }
         ast.hiddenPrefix = ast.hiddenPrefix.concat(prefix);
         var trailingSuffix = this.skipWS();
         ast.hiddenSuffix = ast.hiddenSuffix.concat(trailingSuffix);
@@ -352,17 +394,12 @@ export class QueryParser {
         var right: BaseAST = null;
 
         // left
-        var la = this.la();
-        switch (la.type) {
-            case TokenType.TERM:
-            case TokenType.PHRASE:
-                left = this.termOrPhrase();
-                break;
-            default:
-                this.unexpectedToken(TokenType.EOF);
-                break;
+        if (this.isExpr()) {
+            left = this.termOrPhrase();
+            left.hiddenSuffix = left.hiddenSuffix.concat(this.skipWS());
+        } else {
+            this.unexpectedToken(TokenType.EOF);
         }
-        left.hiddenSuffix = left.hiddenSuffix.concat(this.skipWS());
 
         if (!this.isOperator()) {
             return left;
