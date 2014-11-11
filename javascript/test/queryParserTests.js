@@ -184,13 +184,13 @@ describe('Query Parser', function () {
         expectIdentityDump(query, true);
     });
 
-    xit('trailing escape character gives error, but can still reproduce', function () {
+    it('trailing escape character gives error, but can still reproduce', function () {
         var query = '\\';
         var parser = new QueryParser(query);
         var ast = parser.parse();
         expect(parser.errors.length).toBe(1);
-        expect(parser.errors[0].message).toBe("Missing term or phrase for field");
-        expect(parser.errors[0].position).toBe(8);
+        expect(parser.errors[0].message).toBe("Unexpected input: '\\'");
+        expect(parser.errors[0].position).toBe(0);
         expectIdentityDump(query, true);
     });
 

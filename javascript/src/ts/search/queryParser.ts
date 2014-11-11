@@ -173,6 +173,7 @@ class QueryLexer {
             token = new Token(this.input, TokenType.COLON, startPos, this.pos);
         } else if (la[0] === '\\' && la.length === 1) {
             // we have an escape character, but nothing that is escaped, we consider this an error
+            this.pos--;
             var startPos = this.pos;
             this.consume();
             token = new Token(this.input, TokenType.ERROR, startPos, this.pos);
@@ -319,8 +320,15 @@ export class QueryParser {
         return this.tokenBuffer[la];
     }
 
-    private skipWS(): Array<Token> {
-        return this.syncWhile(TokenType.WS);
+    private skipHidden(): Array<Token> {
+        var skippedTokens = this.syncWhile(TokenType.WS, TokenType.ERROR);
+        skippedTokens.filter((token) => token.type === TokenType.ERROR).forEach((errorToken) => {
+            this.errors.push({
+                position: errorToken.beginPos,
+                message: "Unexpected input: '" + errorToken.asString() + "'"
+            });
+        });
+        return skippedTokens;
     }
 
     private syncWhile(...syncWhile: TokenType[]): Array<Token> {
@@ -360,14 +368,14 @@ export class QueryParser {
     parse(): AST {
         this.errors = [];
         var ast;
-        var prefix = this.skipWS();
+        var prefix = this.skipHidden();
         if (this.isExpr()) {
             ast = this.exprs();
         } else {
             ast = new MissingAST();
         }
         ast.hiddenPrefix = ast.hiddenPrefix.concat(prefix);
-        var trailingSuffix = this.skipWS();
+        var trailingSuffix = this.skipHidden();
         ast.hiddenSuffix = ast.hiddenSuffix.concat(trailingSuffix);
         return ast;
     }
@@ -396,7 +404,7 @@ export class QueryParser {
         // left
         if (this.isExpr()) {
             left = this.termOrPhrase();
-            left.hiddenSuffix = left.hiddenSuffix.concat(this.skipWS());
+            left.hiddenSuffix = left.hiddenSuffix.concat(this.skipHidden());
         } else {
             this.unexpectedToken(TokenType.EOF);
         }
@@ -406,7 +414,7 @@ export class QueryParser {
         } else {
             op = this.la();
             this.consume();
-            var prefix = this.skipWS();
+            var prefix = this.skipHidden();
             if (this.isExpr()) {
                 right = this.expr();
             } else {
@@ -433,12 +441,12 @@ export class QueryParser {
     termOrPhrase() {
         var termOrField = this.la();
         this.consume();
-        var wsAfterTermOrField = this.skipWS();
+        var wsAfterTermOrField = this.skipHidden();
         // no ws allowed here
         if (this.la().type === TokenType.COLON) {
             var colon = this.la();
             this.consume();
-            var prefixAfterColon = this.skipWS();
+            var prefixAfterColon = this.skipHidden();
             if (this.la().type === TokenType.TERM || this.la().type === TokenType.PHRASE) {
                 var term = this.la();
                 this.consume();

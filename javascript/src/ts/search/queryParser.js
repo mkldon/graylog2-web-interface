@@ -195,6 +195,7 @@ var QueryLexer = (function () {
         }
         else if (la[0] === '\\' && la.length === 1) {
             // we have an escape character, but nothing that is escaped, we consider this an error
+            this.pos--;
             var startPos = this.pos;
             this.consume();
             token = new Token(this.input, 8 /* ERROR */, startPos, this.pos);
@@ -320,8 +321,16 @@ var QueryParser = (function () {
         }
         return this.tokenBuffer[la];
     };
-    QueryParser.prototype.skipWS = function () {
-        return this.syncWhile(1 /* WS */);
+    QueryParser.prototype.skipHidden = function () {
+        var _this = this;
+        var skippedTokens = this.syncWhile(1 /* WS */, 8 /* ERROR */);
+        skippedTokens.filter(function (token) { return token.type === 8 /* ERROR */; }).forEach(function (errorToken) {
+            _this.errors.push({
+                position: errorToken.beginPos,
+                message: "Unexpected input: '" + errorToken.asString() + "'"
+            });
+        });
+        return skippedTokens;
     };
     QueryParser.prototype.syncWhile = function () {
         var _this = this;
@@ -370,7 +379,7 @@ var QueryParser = (function () {
     QueryParser.prototype.parse = function () {
         this.errors = [];
         var ast;
-        var prefix = this.skipWS();
+        var prefix = this.skipHidden();
         if (this.isExpr()) {
             ast = this.exprs();
         }
@@ -378,7 +387,7 @@ var QueryParser = (function () {
             ast = new MissingAST();
         }
         ast.hiddenPrefix = ast.hiddenPrefix.concat(prefix);
-        var trailingSuffix = this.skipWS();
+        var trailingSuffix = this.skipHidden();
         ast.hiddenSuffix = ast.hiddenSuffix.concat(trailingSuffix);
         return ast;
     };
@@ -404,7 +413,7 @@ var QueryParser = (function () {
         // left
         if (this.isExpr()) {
             left = this.termOrPhrase();
-            left.hiddenSuffix = left.hiddenSuffix.concat(this.skipWS());
+            left.hiddenSuffix = left.hiddenSuffix.concat(this.skipHidden());
         }
         else {
             this.unexpectedToken(0 /* EOF */);
@@ -415,7 +424,7 @@ var QueryParser = (function () {
         else {
             op = this.la();
             this.consume();
-            var prefix = this.skipWS();
+            var prefix = this.skipHidden();
             if (this.isExpr()) {
                 right = this.expr();
             }
@@ -444,12 +453,12 @@ var QueryParser = (function () {
     QueryParser.prototype.termOrPhrase = function () {
         var termOrField = this.la();
         this.consume();
-        var wsAfterTermOrField = this.skipWS();
+        var wsAfterTermOrField = this.skipHidden();
         // no ws allowed here
         if (this.la().type === 7 /* COLON */) {
             var colon = this.la();
             this.consume();
-            var prefixAfterColon = this.skipWS();
+            var prefixAfterColon = this.skipHidden();
             if (this.la().type === 2 /* TERM */ || this.la().type === 3 /* PHRASE */) {
                 var term = this.la();
                 this.consume();
