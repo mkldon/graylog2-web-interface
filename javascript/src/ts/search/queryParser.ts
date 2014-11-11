@@ -1,7 +1,8 @@
-///<reference path='./../../../node_modules/immutable/dist/Immutable.d.ts'/>
 'use strict';
 
 // parser for http://lucene.apache.org/core/2_9_4/queryparsersyntax.html
+// http://www.lucenetutorial.com/lucene-query-syntax.html
+// Referecen to PEG grammar for the same task: https://raw.githubusercontent.com/polyfractal/elasticsearch-inquisitor/master/_site/js/vendor/lucene/lucene-query.grammar
 
 export interface Visitor {
     visit(ast: AST);
@@ -44,18 +45,25 @@ export class DumpVisitor implements Visitor {
     private dumpWithPrefixAndSuffixWithField(ast: TermWithFieldAST) {
         this.dumpPrefix(ast);
         this.dumpToken(ast.field);
+        this.dumpHidden(ast.hiddenColonPrefix);
         this.dumpToken(ast.colon);
+        this.dumpHidden(ast.hiddenColonSuffix);
         this.dumpToken(ast.term);
         this.dumpSuffix(ast);
     }
 
     private dumpSuffix(ast: AST) {
-        ast.hiddenSuffix.forEach((suffix) => this.dumpToken(suffix));
+        this.dumpHidden(ast.hiddenSuffix);
+    }
+
+    private dumpHidden(hidden: Array<Token>) {
+        hidden.forEach((token) => this.dumpToken(token));
     }
 
     private dumpPrefix(ast: AST) {
-        ast.hiddenPrefix.forEach((prefix) => this.dumpToken(prefix));
+        this.dumpHidden(ast.hiddenPrefix);
     }
+
     private dumpToken(token: Token) {
         token !== null && this.buffer.push(token.asString());
     }
@@ -102,6 +110,8 @@ export class TermAST extends BaseAST implements AST {
 }
 
 export class TermWithFieldAST extends TermAST implements AST {
+    hiddenColonPrefix: Array<Token> = [];
+    hiddenColonSuffix: Array<Token> = [];
     constructor(public field: Token, public colon: Token, term: Token) {
         super(term);
     }
@@ -386,23 +396,31 @@ export class QueryParser {
     termOrPhrase() {
         var termOrField = this.la();
         this.consume();
+        var wsAfterTermOrField = this.skipWS();
         // no ws allowed here
         if (this.la().type === TokenType.COLON) {
             var colon = this.la();
             this.consume();
+            var prefixAfterColon = this.skipWS();
             if (this.la().type === TokenType.TERM || this.la().type === TokenType.PHRASE) {
                 var term = this.la();
                 this.consume();
                 var ast = new TermWithFieldAST(termOrField, colon, term);
+                ast.hiddenColonPrefix = wsAfterTermOrField;
+                ast.hiddenColonSuffix = prefixAfterColon;
                 return ast;
             } else {
                 var skippedTokens = this.missingToken("term or phrase for field", TokenType.EOF);
                 var ast = new TermWithFieldAST(termOrField, colon, null);
+                ast.hiddenColonPrefix = wsAfterTermOrField;
+                ast.hiddenColonSuffix = prefixAfterColon;
                 ast.hiddenSuffix = skippedTokens;
                 return ast;
             }
         }
-        return new TermAST(termOrField);
+        var termAST = new TermAST(termOrField);
+        termAST.hiddenSuffix = wsAfterTermOrField;
+        return termAST;
     }
 }
 

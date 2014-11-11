@@ -1,4 +1,3 @@
-///<reference path='./../../../node_modules/immutable/dist/Immutable.d.ts'/>
 'use strict';
 var __extends = this.__extends || function (d, b) {
     for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
@@ -48,17 +47,21 @@ var DumpVisitor = (function () {
     DumpVisitor.prototype.dumpWithPrefixAndSuffixWithField = function (ast) {
         this.dumpPrefix(ast);
         this.dumpToken(ast.field);
+        this.dumpHidden(ast.hiddenColonPrefix);
         this.dumpToken(ast.colon);
+        this.dumpHidden(ast.hiddenColonSuffix);
         this.dumpToken(ast.term);
         this.dumpSuffix(ast);
     };
     DumpVisitor.prototype.dumpSuffix = function (ast) {
+        this.dumpHidden(ast.hiddenSuffix);
+    };
+    DumpVisitor.prototype.dumpHidden = function (hidden) {
         var _this = this;
-        ast.hiddenSuffix.forEach(function (suffix) { return _this.dumpToken(suffix); });
+        hidden.forEach(function (token) { return _this.dumpToken(token); });
     };
     DumpVisitor.prototype.dumpPrefix = function (ast) {
-        var _this = this;
-        ast.hiddenPrefix.forEach(function (prefix) { return _this.dumpToken(prefix); });
+        this.dumpHidden(ast.hiddenPrefix);
     };
     DumpVisitor.prototype.dumpToken = function (token) {
         token !== null && this.buffer.push(token.asString());
@@ -124,6 +127,8 @@ var TermWithFieldAST = (function (_super) {
         _super.call(this, term);
         this.field = field;
         this.colon = colon;
+        this.hiddenColonPrefix = [];
+        this.hiddenColonSuffix = [];
     }
     return TermWithFieldAST;
 })(TermAST);
@@ -404,24 +409,32 @@ var QueryParser = (function () {
     QueryParser.prototype.termOrPhrase = function () {
         var termOrField = this.la();
         this.consume();
+        var wsAfterTermOrField = this.skipWS();
         // no ws allowed here
         if (this.la().type === 7 /* COLON */) {
             var colon = this.la();
             this.consume();
+            var prefixAfterColon = this.skipWS();
             if (this.la().type === 2 /* TERM */ || this.la().type === 3 /* PHRASE */) {
                 var term = this.la();
                 this.consume();
                 var ast = new TermWithFieldAST(termOrField, colon, term);
+                ast.hiddenColonPrefix = wsAfterTermOrField;
+                ast.hiddenColonSuffix = prefixAfterColon;
                 return ast;
             }
             else {
                 var skippedTokens = this.missingToken("term or phrase for field", 0 /* EOF */);
                 var ast = new TermWithFieldAST(termOrField, colon, null);
+                ast.hiddenColonPrefix = wsAfterTermOrField;
+                ast.hiddenColonSuffix = prefixAfterColon;
                 ast.hiddenSuffix = skippedTokens;
                 return ast;
             }
         }
-        return new TermAST(termOrField);
+        var termAST = new TermAST(termOrField);
+        termAST.hiddenSuffix = wsAfterTermOrField;
+        return termAST;
     };
     return QueryParser;
 })();

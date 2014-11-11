@@ -60,6 +60,12 @@ describe('Query Parser', function () {
         expectIdentityDump(query);
     });
 
+    it('tolerates ws before and after colon in a field expression', function () {
+        var query = 'action : login';
+        expectIdentityDump(query);
+    });
+
+
     it('can parse a phrase', function () {
         var query = '"login now"';
         var parser = new QueryParser(query);
@@ -138,13 +144,13 @@ describe('Query Parser', function () {
         expectIdentityDump(query, true);
     });
 
-    it('reports an error when colon after field is followed by ws', function () {
-        var query = 'action: login now';
+    it('reports an error when field is missing term', function () {
+        var query = 'action : ';
         var parser = new QueryParser(query);
         var ast = parser.parse();
         expect(parser.errors.length).toBe(1);
         expect(parser.errors[0].message).toBe("Missing term or phrase for field");
-        expect(parser.errors[0].position).toBe(7);
+        expect(parser.errors[0].position).toBe(8);
         expectIdentityDump(query, true);
     });
 
