@@ -6,8 +6,6 @@ var __extends = this.__extends || function (d, b) {
     __.prototype = b.prototype;
     d.prototype = new __();
 };
-// parser for http://lucene.apache.org/core/2_9_4/queryparsersyntax.html
-var Immutable = require('immutable');
 var DumpVisitor = (function () {
     function DumpVisitor() {
         this.buffer = [];
@@ -31,26 +29,36 @@ var DumpVisitor = (function () {
             this.visit(expr.right);
             this.dumpSuffix(ast);
         }
+        else if (ast instanceof TermWithFieldAST) {
+            this.dumpWithPrefixAndSuffixWithField(ast);
+        }
         else if (ast instanceof TermAST) {
             this.dumpWithPrefixAndSuffix(ast);
+        }
+        else if (ast instanceof BaseAST) {
+            this.dumpPrefix(ast);
+            this.dumpSuffix(ast);
         }
     };
     DumpVisitor.prototype.dumpWithPrefixAndSuffix = function (ast) {
         this.dumpPrefix(ast);
-        if (ast.field) {
-            this.dumpToken(ast.field);
-            this.buffer.push(":");
-        }
+        this.dumpToken(ast.term);
+        this.dumpSuffix(ast);
+    };
+    DumpVisitor.prototype.dumpWithPrefixAndSuffixWithField = function (ast) {
+        this.dumpPrefix(ast);
+        this.dumpToken(ast.field);
+        this.dumpToken(ast.colon);
         this.dumpToken(ast.term);
         this.dumpSuffix(ast);
     };
     DumpVisitor.prototype.dumpSuffix = function (ast) {
         var _this = this;
-        ast.hiddenSuffixTokens().forEach(function (suffix) { return _this.dumpToken(suffix); });
+        ast.hiddenSuffix.forEach(function (suffix) { return _this.dumpToken(suffix); });
     };
     DumpVisitor.prototype.dumpPrefix = function (ast) {
         var _this = this;
-        ast.hiddenPrefixTokens().forEach(function (prefix) { return _this.dumpToken(prefix); });
+        ast.hiddenPrefix.forEach(function (prefix) { return _this.dumpToken(prefix); });
     };
     DumpVisitor.prototype.dumpToken = function (token) {
         token !== null && this.buffer.push(token.asString());
@@ -70,21 +78,23 @@ exports.DumpVisitor = DumpVisitor;
     TokenType[TokenType["OR"] = 5] = "OR";
     TokenType[TokenType["NOT"] = 6] = "NOT";
     TokenType[TokenType["COLON"] = 7] = "COLON";
+    TokenType[TokenType["ERROR"] = 8] = "ERROR";
 })(exports.TokenType || (exports.TokenType = {}));
 var TokenType = exports.TokenType;
 var BaseAST = (function () {
     function BaseAST() {
-        this.hiddenPrefix = Immutable.List.of();
-        this.hiddenSuffix = Immutable.List.of();
+        this.hiddenPrefix = [];
+        this.hiddenSuffix = [];
     }
-    BaseAST.prototype.hiddenPrefixTokens = function () {
-        return this.hiddenPrefix;
-    };
-    BaseAST.prototype.hiddenSuffixTokens = function () {
-        return this.hiddenSuffix;
-    };
     return BaseAST;
 })();
+var MissingAST = (function (_super) {
+    __extends(MissingAST, _super);
+    function MissingAST() {
+        _super.apply(this, arguments);
+    }
+    return MissingAST;
+})(BaseAST);
 var ExpressionAST = (function (_super) {
     __extends(ExpressionAST, _super);
     function ExpressionAST(left, op, right) {
@@ -92,19 +102,15 @@ var ExpressionAST = (function (_super) {
         this.left = left;
         this.op = op;
         this.right = right;
-        this.left = left;
-        this.right = right;
-        this.op = op;
     }
     return ExpressionAST;
 })(BaseAST);
 exports.ExpressionAST = ExpressionAST;
 var TermAST = (function (_super) {
     __extends(TermAST, _super);
-    function TermAST(term, field) {
+    function TermAST(term) {
         _super.call(this);
         this.term = term;
-        this.field = field;
     }
     TermAST.prototype.isPhrase = function () {
         return this.term.asString().indexOf(" ") !== -1;
@@ -112,6 +118,16 @@ var TermAST = (function (_super) {
     return TermAST;
 })(BaseAST);
 exports.TermAST = TermAST;
+var TermWithFieldAST = (function (_super) {
+    __extends(TermWithFieldAST, _super);
+    function TermWithFieldAST(field, colon, term) {
+        _super.call(this, term);
+        this.field = field;
+        this.colon = colon;
+    }
+    return TermWithFieldAST;
+})(TermAST);
+exports.TermWithFieldAST = TermWithFieldAST;
 var ExpressionListAST = (function (_super) {
     __extends(ExpressionListAST, _super);
     function ExpressionListAST() {
@@ -120,11 +136,11 @@ var ExpressionListAST = (function (_super) {
             expressions[_i - 0] = arguments[_i];
         }
         _super.call(this);
-        this.expressions = Immutable.List.of();
-        this.expressions = this.expressions.merge(expressions);
+        this.expressions = Array();
+        this.expressions = this.expressions.concat(expressions);
     }
     ExpressionListAST.prototype.add = function (expr) {
-        this.expressions = this.expressions.push(expr);
+        this.expressions.push(expr);
     };
     return ExpressionListAST;
 })(BaseAST);
@@ -135,6 +151,7 @@ var Token = (function () {
         this.type = type;
         this.beginPos = beginPos;
         this.endPos = endPos;
+        this.typeName = TokenType[type];
     }
     Token.prototype.asString = function () {
         return this.input.substring(this.beginPos, this.endPos);
@@ -246,7 +263,7 @@ var QueryLexer = (function () {
 var QueryParser = (function () {
     function QueryParser(input) {
         this.input = input;
-        this.errors = Immutable.List.of();
+        this.errors = [];
         this.lexer = new QueryLexer(input);
         this.tokenBuffer = [];
     }
@@ -273,61 +290,61 @@ var QueryParser = (function () {
         for (var _i = 0; _i < arguments.length; _i++) {
             syncWhile[_i - 0] = arguments[_i];
         }
-        var skippedTokens = Immutable.List.of().asMutable();
+        var skippedTokens = [];
         while (syncWhile.some(function (type) { return type === _this.la().type; })) {
             skippedTokens.push(this.la());
             this.consume();
         }
-        return skippedTokens.asImmutable();
+        return skippedTokens;
     };
     QueryParser.prototype.syncTo = function (syncTo) {
         var _this = this;
-        var skippedTokens = Immutable.List.of().asMutable();
+        var skippedTokens = [];
         while (this.la().type !== 0 /* EOF */ && syncTo.every(function (type) { return type !== _this.la().type; })) {
             skippedTokens.push(this.la());
             this.consume();
         }
-        return skippedTokens.asImmutable();
+        return skippedTokens;
     };
     QueryParser.prototype.unexpectedToken = function () {
         var syncTo = [];
         for (var _i = 0; _i < arguments.length; _i++) {
             syncTo[_i - 0] = arguments[_i];
         }
-        this.errors = this.errors.push({
+        this.errors.push({
             position: this.la().beginPos,
             message: "Unexpected input"
         });
-        this.syncTo(syncTo);
+        return this.syncTo(syncTo);
     };
     QueryParser.prototype.missingToken = function (tokenName) {
         var syncTo = [];
         for (var _i = 1; _i < arguments.length; _i++) {
             syncTo[_i - 1] = arguments[_i];
         }
-        this.errors = this.errors.push({
+        this.errors.push({
             position: this.la().beginPos,
             message: "Missing " + tokenName
         });
-        this.syncTo(syncTo);
+        return this.syncTo(syncTo);
     };
     QueryParser.prototype.parse = function () {
-        this.errors = this.errors.clear();
+        this.errors = [];
         var ast;
         var prefix = this.skipWS();
         ast = this.exprs();
-        ast.hiddenPrefix = ast.hiddenPrefix.merge(prefix);
+        ast.hiddenPrefix = ast.hiddenPrefix.concat(prefix);
         var trailingSuffix = this.skipWS();
-        ast.hiddenSuffix = ast.hiddenSuffix.merge(trailingSuffix);
+        ast.hiddenSuffix = ast.hiddenSuffix.concat(trailingSuffix);
         return ast;
     };
     QueryParser.prototype.exprs = function () {
-        var expressionList = new ExpressionListAST();
         var expr = this.expr();
         if (!this.isExpr()) {
             return expr;
         }
         else {
+            var expressionList = new ExpressionListAST();
             expressionList.add(expr);
             while (this.isExpr()) {
                 expr = this.expr();
@@ -351,7 +368,7 @@ var QueryParser = (function () {
                 this.unexpectedToken(0 /* EOF */);
                 break;
         }
-        left.hiddenSuffix = this.skipWS();
+        left.hiddenSuffix = left.hiddenSuffix.concat(this.skipWS());
         if (!this.isOperator()) {
             return left;
         }
@@ -361,11 +378,12 @@ var QueryParser = (function () {
             var prefix = this.skipWS();
             if (this.isExpr()) {
                 right = this.expr();
-                right.hiddenPrefix = prefix;
             }
             else {
                 this.missingToken("right side of expression", 0 /* EOF */);
+                right = new MissingAST();
             }
+            right.hiddenPrefix = prefix;
             return new ExpressionAST(left, op, right);
         }
     };
@@ -388,19 +406,22 @@ var QueryParser = (function () {
         this.consume();
         // no ws allowed here
         if (this.la().type === 7 /* COLON */) {
+            var colon = this.la();
             this.consume();
             if (this.la().type === 2 /* TERM */ || this.la().type === 3 /* PHRASE */) {
                 var term = this.la();
                 this.consume();
-                var ast = new TermAST(term, termOrField);
+                var ast = new TermWithFieldAST(termOrField, colon, term);
                 return ast;
             }
             else {
-                this.missingToken("term or phrase for field", 0 /* EOF */);
+                var skippedTokens = this.missingToken("term or phrase for field", 0 /* EOF */);
+                var ast = new TermWithFieldAST(termOrField, colon, null);
+                ast.hiddenSuffix = skippedTokens;
+                return ast;
             }
         }
-        var ast = new TermAST(termOrField);
-        return ast;
+        return new TermAST(termOrField);
     };
     return QueryParser;
 })();

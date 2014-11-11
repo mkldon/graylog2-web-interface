@@ -1,19 +1,21 @@
 'use strict';
 
 describe('Query Parser', function () {
-    var queryParser, TermAST, Token, QueryParser, TokenType;
+    var queryParser, TermAST, Token, QueryParser, TokenType, olli;
 
     var expectNoErrors = function (parser) {
-        expect(parser.errors.size).toBe(0);
+        expect(parser.errors.length).toBe(0);
     };
 
-    function expectIdentityDump(query) {
+    function expectIdentityDump(query, ignoreErrors) {
         var parser = new QueryParser(query);
         var ast = parser.parse();
         var dumpVisitor = new queryParser.DumpVisitor();
         dumpVisitor.visit(ast);
         var dumped = dumpVisitor.result();
-        expectNoErrors(parser);
+        if (!ignoreErrors) {
+            expectNoErrors(parser);
+        }
         expect(dumped).toBe(query);
     }
 
@@ -39,6 +41,12 @@ describe('Query Parser', function () {
 
     it('can parse two terms', function () {
         var query = "login submit";
+        var parser = new QueryParser(query);
+        var ast = parser.parse();
+        expect(ast instanceof ExpressionListAST).toBeTruthy();
+        expect(ast.expressions.length).toBe(2);
+        var firstExpr = ast.expressions[0];
+        expect(firstExpr instanceof TermAST).toBeTruthy();
         expectIdentityDump(query);
     });
 
@@ -121,23 +129,24 @@ describe('Query Parser', function () {
     });
 
     it('reports an error when right side of AND is missing', function () {
-        var query = "login AND";
+        var query = "login AND ";
         var parser = new QueryParser(query);
         var ast = parser.parse();
-        expect(parser.errors.size).toBe(1);
-        expect(parser.errors.get(0).message).toBe("Missing right side of expression");
-        expect(parser.errors.get(0).position).toBe(8);
+        expect(parser.errors.length).toBe(1);
+        expect(parser.errors[0].message).toBe("Missing right side of expression");
+        expect(parser.errors[0].position).toBe(9);
+        expectIdentityDump(query, true);
     });
 
     it('reports an error when colon after field is followed by ws', function () {
         var query = 'action: login now';
         var parser = new QueryParser(query);
         var ast = parser.parse();
-        expect(parser.errors.size).toBe(1);
-        expect(parser.errors.get(0).message).toBe("Missing term or phrase for field");
-        expect(parser.errors.get(0).position).toBe(7);
+        expect(parser.errors.length).toBe(1);
+        expect(parser.errors[0].message).toBe("Missing term or phrase for field");
+        expect(parser.errors[0].position).toBe(7);
+        expectIdentityDump(query, true);
     });
-
 
 });
 

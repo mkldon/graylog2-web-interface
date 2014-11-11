@@ -3,8 +3,6 @@
 
 // parser for http://lucene.apache.org/core/2_9_4/queryparsersyntax.html
 
-import Immutable = require('immutable');
-
 export interface Visitor {
     visit(ast: AST);
 }
@@ -27,27 +25,36 @@ export class DumpVisitor implements Visitor {
             this.dumpToken(expr.op);
             this.visit(expr.right);
             this.dumpSuffix(ast);
+        } else if (ast instanceof TermWithFieldAST) {
+            this.dumpWithPrefixAndSuffixWithField(ast);
         } else if (ast instanceof TermAST) {
             this.dumpWithPrefixAndSuffix(ast);
+        } else if (ast instanceof BaseAST) {
+            this.dumpPrefix(ast);
+            this.dumpSuffix(ast);
         }
     }
 
     private dumpWithPrefixAndSuffix(ast: TermAST) {
         this.dumpPrefix(ast);
-        if (ast.field) {
-            this.dumpToken(ast.field);
-            this.buffer.push(":");
-        }
         this.dumpToken(ast.term);
         this.dumpSuffix(ast);
     }
 
-    private dumpSuffix(ast) {
-        ast.hiddenSuffixTokens().forEach((suffix) => this.dumpToken(suffix));
+    private dumpWithPrefixAndSuffixWithField(ast: TermWithFieldAST) {
+        this.dumpPrefix(ast);
+        this.dumpToken(ast.field);
+        this.dumpToken(ast.colon);
+        this.dumpToken(ast.term);
+        this.dumpSuffix(ast);
     }
 
-    private dumpPrefix(ast) {
-        ast.hiddenPrefixTokens().forEach((prefix) => this.dumpToken(prefix));
+    private dumpSuffix(ast: AST) {
+        ast.hiddenSuffix.forEach((suffix) => this.dumpToken(suffix));
+    }
+
+    private dumpPrefix(ast: AST) {
+        ast.hiddenPrefix.forEach((prefix) => this.dumpToken(prefix));
     }
     private dumpToken(token: Token) {
         token !== null && this.buffer.push(token.asString());
@@ -60,39 +67,32 @@ export class DumpVisitor implements Visitor {
 }
 
 export enum TokenType {
-    EOF, WS, TERM, PHRASE, AND, OR, NOT, COLON
+    EOF, WS, TERM, PHRASE, AND, OR, NOT, COLON, ERROR
 }
 
 export interface AST {
-    hiddenPrefixTokens(): Immutable.List<Token>;
-    hiddenSuffixTokens(): Immutable.List<Token>;
+    hiddenPrefix: Array<Token>;
+    hiddenSuffix: Array<Token>;
 }
 
 class BaseAST implements AST {
-    public hiddenPrefix: Immutable.List<Token> = Immutable.List.of<Token>();
-    public hiddenSuffix: Immutable.List<Token> = Immutable.List.of<Token>();
+    hiddenPrefix: Array<Token> = [];
+    hiddenSuffix: Array<Token> = [];
+}
 
-    hiddenPrefixTokens() {
-        return this.hiddenPrefix;
-    }
+class MissingAST extends BaseAST {
 
-    hiddenSuffixTokens() {
-        return this.hiddenSuffix;
-    }
 }
 
 export class ExpressionAST extends BaseAST implements AST {
     constructor(public left: TermAST, public op: Token,
                 public right: AST) {
         super();
-        this.left = left;
-        this.right = right;
-        this.op = op;
     }
 }
 
 export class TermAST extends BaseAST implements AST {
-    constructor(public term: Token, public field?: Token) {
+    constructor(public term: Token) {
         super();
     }
 
@@ -101,25 +101,36 @@ export class TermAST extends BaseAST implements AST {
     }
 }
 
+export class TermWithFieldAST extends TermAST implements AST {
+    constructor(public field: Token, public colon: Token, term: Token) {
+        super(term);
+    }
+
+}
+
 export class ExpressionListAST extends BaseAST implements AST {
-    public expressions = Immutable.List.of<BaseAST>();
+    public expressions = Array<BaseAST>();
     constructor (...expressions: BaseAST[]) {
         super();
-        this.expressions = this.expressions.merge(expressions);
+        this.expressions = this.expressions.concat(expressions);
     }
 
     add(expr: BaseAST) {
-        this.expressions = this.expressions.push(expr);
+        this.expressions.push(expr);
     }
 }
 
 export class Token {
+    // for better readability
+    public typeName: string;
     constructor(private input: string, public type: TokenType, public beginPos: number, public endPos: number) {
+        this.typeName = TokenType[type];
     }
 
     asString() {
         return this.input.substring(this.beginPos, this.endPos);
     }
+
 }
 
 class QueryLexer {
@@ -237,7 +248,7 @@ export interface ErrorObject {
 export class QueryParser {
     private lexer: QueryLexer;
     private tokenBuffer: Array<Token>;
-    public errors = Immutable.List.of<ErrorObject>();
+    public errors: Array<ErrorObject> = [];
 
     constructor(private input: string) {
         this.lexer = new QueryLexer(input);
@@ -260,62 +271,62 @@ export class QueryParser {
         return this.tokenBuffer[la];
     }
 
-    private skipWS(): Immutable.List<Token> {
+    private skipWS(): Array<Token> {
         return this.syncWhile(TokenType.WS);
     }
 
-    private syncWhile(...syncWhile: TokenType[]): Immutable.List<Token> {
-        var skippedTokens = Immutable.List.of<Token>().asMutable();
+    private syncWhile(...syncWhile: TokenType[]): Array<Token> {
+        var skippedTokens = [];
         while (syncWhile.some((type) => type === this.la().type)) {
             skippedTokens.push(this.la());
             this.consume();
         }
-        return skippedTokens.asImmutable();
+        return skippedTokens;
     }
 
-    private syncTo(syncTo: TokenType[]): Immutable.List<Token> {
-        var skippedTokens = Immutable.List.of<Token>().asMutable();
+    private syncTo(syncTo: TokenType[]): Array<Token> {
+        var skippedTokens = [];
         while (this.la().type !== TokenType.EOF && syncTo.every((type) => type !== this.la().type)) {
             skippedTokens.push(this.la());
             this.consume();
         }
-        return skippedTokens.asImmutable();
+        return skippedTokens;
     }
 
     private unexpectedToken(...syncTo: TokenType[]) {
-        this.errors = this.errors.push({
+        this.errors.push({
             position: this.la().beginPos,
             message: "Unexpected input"
         });
-        this.syncTo(syncTo);
+        return this.syncTo(syncTo);
     }
 
     private missingToken(tokenName: string, ...syncTo: TokenType[]) {
-        this.errors = this.errors.push({
+        this.errors.push({
             position: this.la().beginPos,
             message: "Missing " + tokenName
         });
-        this.syncTo(syncTo);
+        return this.syncTo(syncTo);
     }
 
     parse(): AST {
-        this.errors = this.errors.clear();
+        this.errors = [];
         var ast;
         var prefix = this.skipWS();
         ast = this.exprs();
-        ast.hiddenPrefix = ast.hiddenPrefix.merge(prefix);
-        var trailingSuffix: Immutable.List<Token> = this.skipWS();
-        ast.hiddenSuffix = ast.hiddenSuffix.merge(trailingSuffix);
+        ast.hiddenPrefix = ast.hiddenPrefix.concat(prefix);
+        var trailingSuffix = this.skipWS();
+        ast.hiddenSuffix = ast.hiddenSuffix.concat(trailingSuffix);
         return ast;
     }
 
     exprs(): AST {
-        var expressionList = new ExpressionListAST();
         var expr = this.expr();
 
         if (!this.isExpr()) {
             return expr;
         } else {
+            var expressionList = new ExpressionListAST();
             expressionList.add(expr);
             while (this.isExpr()) {
                 expr = this.expr();
@@ -341,7 +352,7 @@ export class QueryParser {
                 this.unexpectedToken(TokenType.EOF);
                 break;
         }
-        left.hiddenSuffix = this.skipWS();
+        left.hiddenSuffix = left.hiddenSuffix.concat(this.skipWS());
 
         if (!this.isOperator()) {
             return left;
@@ -351,10 +362,11 @@ export class QueryParser {
             var prefix = this.skipWS();
             if (this.isExpr()) {
                 right = this.expr();
-                right.hiddenPrefix = prefix;
             } else {
                 this.missingToken("right side of expression", TokenType.EOF);
+                right = new MissingAST();
             }
+            right.hiddenPrefix = prefix;
             return new ExpressionAST(left, op, right);
         }
     }
@@ -376,18 +388,21 @@ export class QueryParser {
         this.consume();
         // no ws allowed here
         if (this.la().type === TokenType.COLON) {
+            var colon = this.la();
             this.consume();
             if (this.la().type === TokenType.TERM || this.la().type === TokenType.PHRASE) {
                 var term = this.la();
                 this.consume();
-                var ast = new TermAST(term, termOrField);
+                var ast = new TermWithFieldAST(termOrField, colon, term);
                 return ast;
             } else {
-                this.missingToken("term or phrase for field", TokenType.EOF);
+                var skippedTokens = this.missingToken("term or phrase for field", TokenType.EOF);
+                var ast = new TermWithFieldAST(termOrField, colon, null);
+                ast.hiddenSuffix = skippedTokens;
+                return ast;
             }
         }
-        var ast = new TermAST(termOrField);
-        return ast;
+        return new TermAST(termOrField);
     }
 }
 
