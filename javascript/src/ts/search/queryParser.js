@@ -5,39 +5,74 @@ var __extends = this.__extends || function (d, b) {
     __.prototype = b.prototype;
     d.prototype = new __();
 };
-var DumpVisitor = (function () {
-    function DumpVisitor() {
-        this.buffer = [];
+var BaseVisitor = (function () {
+    function BaseVisitor() {
     }
-    DumpVisitor.prototype.visit = function (ast) {
-        var _this = this;
+    BaseVisitor.prototype.visit = function (ast) {
         if (ast === null) {
             return;
         }
         else if (ast instanceof ExpressionListAST) {
-            this.dumpPrefix(ast);
-            var exprList = ast;
-            exprList.expressions.forEach(function (expr) { return _this.visit(expr); });
-            this.dumpSuffix(ast);
+            this.visitExpressionListAST(ast);
         }
         else if (ast instanceof ExpressionAST) {
-            var expr = ast;
-            this.dumpPrefix(ast);
-            this.visit(expr.left);
-            this.dumpToken(expr.op);
-            this.visit(expr.right);
-            this.dumpSuffix(ast);
+            this.visitExpressionList(ast);
         }
         else if (ast instanceof TermWithFieldAST) {
-            this.dumpWithPrefixAndSuffixWithField(ast);
+            this.visitTermWithFieldAST(ast);
         }
         else if (ast instanceof TermAST) {
-            this.dumpWithPrefixAndSuffix(ast);
+            this.visitTermAST(ast);
         }
-        else if (ast instanceof BaseAST) {
-            this.dumpPrefix(ast);
-            this.dumpSuffix(ast);
+        else if (ast instanceof MissingAST) {
+            this.visitMissingAST(ast);
         }
+        else {
+            throw Error("Encountered AST of unknown type: " + JSON.stringify(ast));
+        }
+    };
+    BaseVisitor.prototype.visitMissingAST = function (ast) {
+    };
+    BaseVisitor.prototype.visitTermAST = function (ast) {
+    };
+    BaseVisitor.prototype.visitTermWithFieldAST = function (ast) {
+    };
+    BaseVisitor.prototype.visitExpressionList = function (ast) {
+    };
+    BaseVisitor.prototype.visitExpressionListAST = function (ast) {
+    };
+    return BaseVisitor;
+})();
+exports.BaseVisitor = BaseVisitor;
+var DumpVisitor = (function (_super) {
+    __extends(DumpVisitor, _super);
+    function DumpVisitor() {
+        _super.apply(this, arguments);
+        this.buffer = [];
+    }
+    DumpVisitor.prototype.visitMissingAST = function (ast) {
+        this.dumpPrefix(ast);
+        this.dumpSuffix(ast);
+    };
+    DumpVisitor.prototype.visitTermAST = function (ast) {
+        this.dumpWithPrefixAndSuffix(ast);
+    };
+    DumpVisitor.prototype.visitTermWithFieldAST = function (ast) {
+        this.dumpWithPrefixAndSuffixWithField(ast);
+    };
+    DumpVisitor.prototype.visitExpressionList = function (ast) {
+        this.dumpPrefix(ast);
+        this.visit(ast.left);
+        this.dumpToken(ast.op);
+        this.visit(ast.right);
+        this.dumpSuffix(ast);
+    };
+    DumpVisitor.prototype.visitExpressionListAST = function (ast) {
+        var _this = this;
+        this.dumpPrefix(ast);
+        var exprList = ast;
+        exprList.expressions.forEach(function (expr) { return _this.visit(expr); });
+        this.dumpSuffix(ast);
     };
     DumpVisitor.prototype.dumpWithPrefixAndSuffix = function (ast) {
         this.dumpPrefix(ast);
@@ -70,7 +105,7 @@ var DumpVisitor = (function () {
         return this.buffer.join("");
     };
     return DumpVisitor;
-})();
+})(BaseVisitor);
 exports.DumpVisitor = DumpVisitor;
 (function (TokenType) {
     TokenType[TokenType["EOF"] = 0] = "EOF";
@@ -84,12 +119,12 @@ exports.DumpVisitor = DumpVisitor;
     TokenType[TokenType["ERROR"] = 8] = "ERROR";
 })(exports.TokenType || (exports.TokenType = {}));
 var TokenType = exports.TokenType;
-var BaseAST = (function () {
-    function BaseAST() {
+var AST = (function () {
+    function AST() {
         this.hiddenPrefix = [];
         this.hiddenSuffix = [];
     }
-    return BaseAST;
+    return AST;
 })();
 var MissingAST = (function (_super) {
     __extends(MissingAST, _super);
@@ -97,7 +132,7 @@ var MissingAST = (function (_super) {
         _super.apply(this, arguments);
     }
     return MissingAST;
-})(BaseAST);
+})(AST);
 var ExpressionAST = (function (_super) {
     __extends(ExpressionAST, _super);
     function ExpressionAST(left, op, right) {
@@ -107,7 +142,7 @@ var ExpressionAST = (function (_super) {
         this.right = right;
     }
     return ExpressionAST;
-})(BaseAST);
+})(AST);
 exports.ExpressionAST = ExpressionAST;
 var TermAST = (function (_super) {
     __extends(TermAST, _super);
@@ -119,7 +154,7 @@ var TermAST = (function (_super) {
         return this.term.asString().indexOf(" ") !== -1;
     };
     return TermAST;
-})(BaseAST);
+})(AST);
 exports.TermAST = TermAST;
 var TermWithFieldAST = (function (_super) {
     __extends(TermWithFieldAST, _super);
@@ -148,7 +183,7 @@ var ExpressionListAST = (function (_super) {
         this.expressions.push(expr);
     };
     return ExpressionListAST;
-})(BaseAST);
+})(AST);
 exports.ExpressionListAST = ExpressionListAST;
 var Token = (function () {
     function Token(input, type, beginPos, endPos) {

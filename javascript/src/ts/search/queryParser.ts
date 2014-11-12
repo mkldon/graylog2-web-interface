@@ -5,34 +5,78 @@
 
 export interface Visitor {
     visit(ast: AST);
+    visitMissingAST(ast: MissingAST);
+    visitTermAST(ast: TermAST);
+    visitTermWithFieldAST(ast: TermWithFieldAST);
+    visitExpressionList(ast: ExpressionAST);
+    visitExpressionListAST(ast: ExpressionListAST);
 }
 
-export class DumpVisitor implements Visitor {
-    private buffer = [];
-
+export class BaseVisitor implements Visitor {
     visit(ast: AST) {
         if (ast === null) {
             return;
         } else if (ast instanceof ExpressionListAST) {
-            this.dumpPrefix(ast);
-            var exprList = <ExpressionListAST>ast;
-            exprList.expressions.forEach((expr) => this.visit(expr));
-            this.dumpSuffix(ast);
+            this.visitExpressionListAST(ast);
         } else if (ast instanceof ExpressionAST) {
-            var expr = <ExpressionAST>ast;
-            this.dumpPrefix(ast);
-            this.visit(expr.left);
-            this.dumpToken(expr.op);
-            this.visit(expr.right);
-            this.dumpSuffix(ast);
+            this.visitExpressionList(ast);
         } else if (ast instanceof TermWithFieldAST) {
-            this.dumpWithPrefixAndSuffixWithField(ast);
+            this.visitTermWithFieldAST(ast);
         } else if (ast instanceof TermAST) {
-            this.dumpWithPrefixAndSuffix(ast);
-        } else if (ast instanceof BaseAST) {
-            this.dumpPrefix(ast);
-            this.dumpSuffix(ast);
+            this.visitTermAST(ast);
+        } else if (ast instanceof MissingAST) {
+            this.visitMissingAST(ast);
+        } else {
+            throw Error("Encountered AST of unknown type: " + JSON.stringify(ast));
         }
+    }
+
+    visitMissingAST(ast: MissingAST) {
+    }
+
+    visitTermAST(ast: TermAST) {
+    }
+
+    visitTermWithFieldAST(ast: TermWithFieldAST) {
+    }
+
+    visitExpressionList(ast: ExpressionAST) {
+    }
+
+    visitExpressionListAST(ast: ExpressionListAST) {
+    }
+
+
+}
+export class DumpVisitor extends BaseVisitor implements Visitor {
+    private buffer = [];
+
+    visitMissingAST(ast: MissingAST) {
+        this.dumpPrefix(ast);
+        this.dumpSuffix(ast);
+    }
+
+    visitTermAST(ast: TermAST) {
+        this.dumpWithPrefixAndSuffix(ast);
+    }
+
+    visitTermWithFieldAST(ast: TermWithFieldAST) {
+        this.dumpWithPrefixAndSuffixWithField(ast);
+    }
+
+    visitExpressionList(ast: ExpressionAST) {
+        this.dumpPrefix(ast);
+        this.visit(ast.left);
+        this.dumpToken(ast.op);
+        this.visit(ast.right);
+        this.dumpSuffix(ast);
+    }
+
+    visitExpressionListAST(ast: ExpressionListAST) {
+        this.dumpPrefix(ast);
+        var exprList = <ExpressionListAST>ast;
+        exprList.expressions.forEach((expr) => this.visit(expr));
+        this.dumpSuffix(ast);
     }
 
     private dumpWithPrefixAndSuffix(ast: TermAST) {
@@ -77,28 +121,23 @@ export enum TokenType {
     EOF, WS, TERM, PHRASE, AND, OR, NOT, COLON, ERROR
 }
 
-export interface AST {
-    hiddenPrefix: Array<Token>;
-    hiddenSuffix: Array<Token>;
-}
-
-class BaseAST implements AST {
+class AST {
     hiddenPrefix: Array<Token> = [];
     hiddenSuffix: Array<Token> = [];
 }
 
-class MissingAST extends BaseAST {
+class MissingAST extends AST {
 
 }
 
-export class ExpressionAST extends BaseAST implements AST {
+export class ExpressionAST extends AST {
     constructor(public left: TermAST, public op: Token,
                 public right: AST) {
         super();
     }
 }
 
-export class TermAST extends BaseAST implements AST {
+export class TermAST extends AST {
     constructor(public term: Token) {
         super();
     }
@@ -108,7 +147,7 @@ export class TermAST extends BaseAST implements AST {
     }
 }
 
-export class TermWithFieldAST extends TermAST implements AST {
+export class TermWithFieldAST extends TermAST {
     hiddenColonPrefix: Array<Token> = [];
     hiddenColonSuffix: Array<Token> = [];
 
@@ -118,15 +157,15 @@ export class TermWithFieldAST extends TermAST implements AST {
 
 }
 
-export class ExpressionListAST extends BaseAST implements AST {
-    public expressions = Array<BaseAST>();
+export class ExpressionListAST extends AST {
+    public expressions = Array<AST>();
 
-    constructor(...expressions: BaseAST[]) {
+    constructor(...expressions: AST[]) {
         super();
         this.expressions = this.expressions.concat(expressions);
     }
 
-    add(expr: BaseAST) {
+    add(expr: AST) {
         this.expressions.push(expr);
     }
 }
@@ -281,7 +320,7 @@ class QueryLexer {
         if (char === '\\') {
             this.consume();
             if (this.input.length <= index) {
-                var escapedChar =this.input[index]
+                var escapedChar = this.input[index]
                 char += escapedChar;
             }
         }
@@ -367,7 +406,7 @@ export class QueryParser {
 
     parse(): AST {
         this.errors = [];
-        var ast;
+        var ast: AST;
         var prefix = this.skipHidden();
         if (this.isExpr()) {
             ast = this.exprs();
@@ -396,10 +435,10 @@ export class QueryParser {
         }
     }
 
-    expr(): BaseAST {
+    expr(): AST {
         var left: TermAST = null;
         var op: Token = null;
-        var right: BaseAST = null;
+        var right: AST = null;
 
         // left
         if (this.isExpr()) {
