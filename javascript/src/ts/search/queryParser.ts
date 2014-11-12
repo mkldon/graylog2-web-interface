@@ -481,7 +481,6 @@ export class QueryParser {
         var termOrField = this.la();
         this.consume();
         var wsAfterTermOrField = this.skipHidden();
-        // no ws allowed here
         if (this.la().type === TokenType.COLON) {
             var colon = this.la();
             this.consume();

@@ -489,7 +489,6 @@ var QueryParser = (function () {
         var termOrField = this.la();
         this.consume();
         var wsAfterTermOrField = this.skipHidden();
-        // no ws allowed here
         if (this.la().type === 7 /* COLON */) {
             var colon = this.la();
             this.consume();
