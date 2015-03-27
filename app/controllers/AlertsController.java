@@ -20,6 +20,7 @@
 package controllers;
 
 import com.google.inject.Inject;
+import org.graylog2.rest.models.alarmcallbacks.responses.AvailableAlarmCallbackSummaryResponse;
 import org.graylog2.restclient.lib.APIException;
 import org.graylog2.restclient.lib.ApiClient;
 import org.graylog2.restclient.models.*;
@@ -27,7 +28,6 @@ import org.graylog2.restclient.models.alerts.Alert;
 import org.graylog2.restclient.models.alerts.AlertCondition;
 import org.graylog2.restclient.models.alerts.AlertConditionService;
 import org.graylog2.restclient.models.api.requests.alerts.CreateAlertConditionRequest;
-import org.graylog2.restclient.models.api.responses.alarmcallbacks.GetSingleAvailableAlarmCallbackResponse;
 import play.mvc.BodyParser;
 import play.mvc.Result;
 
@@ -76,7 +76,7 @@ public class AlertsController extends AuthenticatedController {
             }
             users.append("]");
 
-            Map<String, GetSingleAvailableAlarmCallbackResponse> availableAlarmCallbacks = alarmCallbackService.available(streamId);
+            Map<String, AvailableAlarmCallbackSummaryResponse> availableAlarmCallbacks = alarmCallbackService.available(streamId);
             List<AlarmCallback> alarmCallbacks = alarmCallbackService.all(streamId);
 
             return ok(views.html.alerts.manage.render(
