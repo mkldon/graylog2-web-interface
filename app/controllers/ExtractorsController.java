@@ -24,6 +24,7 @@ import com.google.common.collect.Maps;
 import com.google.inject.Inject;
 import lib.BreadcrumbList;
 import lib.security.RestPermissions;
+import org.graylog2.rest.models.system.inputs.extractors.requests.CreateExtractorRequest;
 import org.graylog2.restclient.lib.APIException;
 import org.graylog2.restclient.lib.ApiClient;
 import org.graylog2.restclient.lib.Version;
@@ -33,7 +34,6 @@ import org.graylog2.restclient.models.Input;
 import org.graylog2.restclient.models.MessagesService;
 import org.graylog2.restclient.models.Node;
 import org.graylog2.restclient.models.NodeService;
-import org.graylog2.restclient.models.api.requests.CreateExtractorRequest;
 import org.graylog2.restclient.models.api.requests.ExtractorImportRequest;
 import org.graylog2.restclient.models.api.requests.ExtractorListImportRequest;
 import org.graylog2.restclient.models.api.results.MessageResult;
@@ -145,7 +145,7 @@ public class ExtractorsController extends AuthenticatedController {
             final Map<String, String[]> form = request().body().asFormUrlEncoded();
             final String title = form.get("title")[0];
 
-            CreateExtractorRequest request;
+            final CreateExtractorRequest request;
             try {
                 request = this.generateCreateExtractorRequest(form);
             } catch (NullPointerException e) {
